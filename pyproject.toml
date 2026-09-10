@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flybrain-sdk"
+version = "0.1.0"
+description = "Plug a fruit-fly connectome into anything"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = ["numpy>=1.24", "scipy>=1.10", "pyarrow>=14"]
+
+[project.optional-dependencies]
+server = ["fastapi>=0.115", "uvicorn>=0.30"]
+media = ["pillow>=10", "opencv-python>=4.8"]
+plot = ["matplotlib>=3.8"]
+dev = ["pytest>=8", "httpx>=0.27", "fastapi>=0.115", "uvicorn>=0.30"]
+
+[project.scripts]
+flybrain = "flybrain.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

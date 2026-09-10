@@ -1,0 +1,16 @@
+{
+  "date_local": "2026-09-11",
+  "dataset": "malecns",
+  "version": "1.0",
+  "neurons": 166700,
+  "edges": 25582938,
+  "topology_sparse_bytes": 307662060,
+  "simulated_ms": 100,
+  "dt_ms": 1,
+  "seed": 0,
+  "load_seconds": 7.832173200004036,
+  "run_seconds": 5.1365895999988425,
+  "input": {"vision": {"left": 1, "right": 0}},
+  "spikes": 453068,
+  "interpretation": "Single local integration observation; not validated biological behavior or a real-time claim"
+}
