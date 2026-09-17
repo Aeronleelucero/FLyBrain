@@ -9,7 +9,8 @@ class CodingState:
 
     task: str
 
-    task_intent: str = "test"
+    # The agent will classify the task during initialization.
+    task_intent: str | None = None
 
     files: list[str] = field(default_factory=list)
 

@@ -1,5 +1,8 @@
 """Task-aware FLY-CODER agent."""
 
+from __future__ import annotations
+
+import argparse
 from pathlib import Path
 
 from flycoder.actions import create_action_registry
@@ -10,6 +13,12 @@ from flycoder.tools.filesystem import Workspace
 
 class FlyCoderAgent:
     """Coding agent that selects actions based on task intent."""
+
+    ANALYSIS_ACTIONS = {
+        "explain_error",
+        "review_code",
+        "improve_code",
+    }
 
     def __init__(self, workspace: str | Path):
         self.workspace = Workspace(workspace)
@@ -29,6 +38,7 @@ class FlyCoderAgent:
                 "why does",
                 "why is",
                 "what is wrong",
+                "what went wrong",
             )
         ):
             return "explain"
@@ -62,20 +72,10 @@ class FlyCoderAgent:
                 "review",
                 "code review",
                 "review the code",
+                "audit",
             )
         ):
             return "review"
-
-        if any(
-            phrase in text
-            for phrase in (
-                "inspect",
-                "list files",
-                "show files",
-                "explore project",
-            )
-        ):
-            return "inspect"
 
         if any(
             phrase in text
@@ -88,6 +88,17 @@ class FlyCoderAgent:
             )
         ):
             return "test"
+
+        if any(
+            phrase in text
+            for phrase in (
+                "inspect",
+                "list files",
+                "show files",
+                "explore project",
+            )
+        ):
+            return "inspect"
 
         return "inspect"
 
@@ -108,27 +119,30 @@ class FlyCoderAgent:
         if not state.files:
             return "inspect_files"
 
-        # Inspection-only tasks finish after listing project files.
         if state.task_intent == "inspect":
-            state.finished = True
             return "finish"
 
-        # Explain tasks inspect the available error without modifying files.
-        if state.task_intent == "explain":
-            if state.last_error and not state.error_inspected:
-                return "fix_error"
+        if state.task_intent in {
+            "explain",
+            "review",
+            "improve",
+        }:
+            if not state.current_file:
+                return "read_file"
 
-            if state.last_error and state.error_inspected:
-                state.finished = True
-                return "finish"
+            if state.current_file_content is None:
+                return "read_file"
 
-            if not state.tests_run:
-                return "run_tests"
+            if state.task_intent == "explain":
+                return "explain_error"
 
-            state.finished = True
-            return "finish"
+            if state.task_intent == "review":
+                return "review_code"
 
-        # Repair, test, review, and improve tasks begin with tests.
+            if state.task_intent == "improve":
+                return "improve_code"
+
+        # Repair workflow.
         if state.last_error and not state.error_inspected:
             return "fix_error"
 
@@ -150,16 +164,10 @@ class FlyCoderAgent:
         if state.user_input_needed:
             return "finish"
 
+        # Test workflow.
         if not state.tests_run:
             return "run_tests"
 
-        if not state.tests_passed:
-            state.finished = True
-            return "finish"
-
-        # Review and improve currently stop safely after verification.
-        # Actual code modification logic can be added next.
-        state.finished = True
         return "finish"
 
     def run_once(self, state: CodingState) -> ActionResult:
@@ -175,17 +183,21 @@ class FlyCoderAgent:
                     "Agent stopped safely. "
                     "Review and approve the repair proposal."
                 )
+            elif state.task_intent == "inspect":
+                message = "Project inspection completed."
+            elif state.task_intent == "explain":
+                message = "Error explanation completed."
+            elif state.task_intent == "review":
+                message = "Code review completed."
+            elif state.task_intent == "improve":
+                message = (
+                    "Improvement proposal created. "
+                    "No file was modified."
+                )
             elif state.tests_passed:
                 message = (
                     f"Task intent '{state.task_intent}' completed. "
                     "All tests passed."
-                )
-            elif state.task_intent == "inspect":
-                message = "Project inspection completed."
-            elif state.task_intent == "explain":
-                message = (
-                    "Error inspection completed. "
-                    "No files were modified."
                 )
             else:
                 message = (
@@ -203,8 +215,141 @@ class FlyCoderAgent:
                 },
             )
 
-        return self.actions.execute(
+        result = self.actions.execute(
             action,
             workspace=self.workspace,
             state=state,
         )
+
+        if action == "explain_error" and result.data:
+            print()
+            print("Error explanation:")
+            print(result.data.get("explanation", ""))
+
+        elif action == "review_code" and result.data:
+            print()
+            print("Code review:")
+            print(result.data.get("review", ""))
+
+        elif action == "improve_code" and result.data:
+            print()
+            print("Improvement proposal:")
+
+            improvements = result.data.get("improvements", [])
+
+            if improvements:
+                for item in improvements:
+                    print(f"  - {item}")
+            else:
+                print("  No specific improvements were identified.")
+
+        # Analysis actions are one-shot operations.
+        if action in self.ANALYSIS_ACTIONS:
+            state.finished = True
+
+        return result
+
+
+def cli() -> None:
+    """Run FLY-CODER from the command line."""
+
+    parser = argparse.ArgumentParser(
+        description="Task-aware FLY-CODER agent"
+    )
+
+    parser.add_argument(
+        "workspace",
+        nargs="?",
+        default=".",
+        help="Workspace directory. Defaults to the current directory.",
+    )
+
+    parser.add_argument(
+        "--task",
+        default="Inspect the project",
+        help="Task to perform.",
+    )
+
+    parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=20,
+        help="Maximum number of agent steps.",
+    )
+
+    parser.add_argument(
+        "--approve",
+        action="store_true",
+        help="Automatically approve a proposed repair.",
+    )
+
+    args = parser.parse_args()
+
+    if args.max_steps < 1:
+        parser.error("--max-steps must be at least 1")
+
+    agent = FlyCoderAgent(args.workspace)
+    state = CodingState(task=args.task)
+
+    print(f"Task: {args.task}")
+    print(f"Task Intent: {agent.classify_task(args.task)}")
+    print()
+
+    for step in range(args.max_steps):
+        if state.finished:
+            break
+
+        result = agent.run_once(state)
+
+        print(
+            f"[Step {step}] "
+            f"{result.action} | "
+            f"success={result.success}"
+        )
+
+        if result.message:
+            print(f"  {result.message}")
+
+        # Do not print analysis data twice because run_once()
+        # already prints readable analysis output.
+        if (
+            result.data
+            and result.action not in FlyCoderAgent.ANALYSIS_ACTIONS
+        ):
+            print(f"  data={result.data}")
+
+        # Optional automatic approval.
+        if (
+            args.approve
+            and state.repair_proposed
+            and not state.repair_applied
+            and state.user_input_needed
+        ):
+            approval_result = agent.actions.execute(
+                "approve_repair",
+                workspace=agent.workspace,
+                state=state,
+            )
+
+            print(
+                f"[Step {step}] "
+                f"{approval_result.action} | "
+                f"success={approval_result.success}"
+            )
+
+            if approval_result.message:
+                print(f"  {approval_result.message}")
+
+    print()
+
+    if state.finished:
+        print("Agent finished.")
+    else:
+        print("Maximum steps reached.")
+
+    if state.repair_proposed and not state.repair_applied:
+        print("A repair proposal is waiting for approval.")
+
+
+if __name__ == "__main__":
+    cli()
