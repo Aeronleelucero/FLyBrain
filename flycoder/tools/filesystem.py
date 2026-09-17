@@ -20,18 +20,51 @@ class Workspace:
         return target
 
     def list_files(self) -> list[str]:
-        """List files inside the workspace."""
+        """List readable source files inside the workspace."""
 
         if not self.root.exists():
             return []
 
-        return sorted(
-            str(path.relative_to(self.root))
-            for path in self.root.rglob("*")
-            if path.is_file()
-            and ".git" not in path.parts
-            and ".venv" not in path.parts
-        )
+        ignored_directories = {
+            ".git",
+            ".venv",
+            "venv",
+            "__pycache__",
+            ".pytest_cache",
+            "node_modules",
+        }
+
+        ignored_extensions = {
+            ".pyc",
+            ".pyo",
+            ".so",
+            ".dll",
+            ".exe",
+            ".db",
+            ".sqlite",
+            ".sqlite3",
+        }
+
+        files = []
+
+        for path in self.root.rglob("*"):
+            if not path.is_file():
+                continue
+
+            relative_path = path.relative_to(self.root)
+
+            if any(
+                directory in ignored_directories
+                for directory in relative_path.parts
+            ):
+                continue
+
+            if path.suffix.lower() in ignored_extensions:
+                continue
+
+            files.append(str(relative_path))
+
+        return sorted(files)
 
     def read_file(self, relative_path: str) -> str:
         """Read a text file inside the workspace."""

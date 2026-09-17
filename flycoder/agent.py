@@ -1,79 +1,94 @@
-"""First FLY-CODER coding-agent prototype."""
+"""FLY-CODER agent with executable actions."""
 
 from pathlib import Path
 
+from flycoder.actions import create_action_registry
+from flycoder.actions.registry import ActionResult
 from flycoder.state import CodingState
 from flycoder.tools.filesystem import Workspace
 
 
 class FlyCoderAgent:
-    """Simple rule-based coding agent."""
+    """Coding agent that selects and executes registered actions."""
 
     def __init__(self, workspace: str | Path):
         self.workspace = Workspace(workspace)
-
-    def inspect(self, state: CodingState) -> CodingState:
-        """Inspect workspace files."""
-
-        state.files = self.workspace.list_files()
-        return state
-
-    def read_current_file(self, state: CodingState) -> CodingState:
-        """Read the selected file."""
-
-        if not state.current_file:
-            if not state.files:
-                state.last_error = "No files available to read."
-                return state
-
-            state.current_file = state.files[0]
-
-        try:
-            content = self.workspace.read_file(state.current_file)
-
-            print()
-            print(f"--- Reading: {state.current_file} ---")
-            print(content)
-            print("--- End file ---")
-            print()
-
-        except Exception as error:
-            state.last_error = str(error)
-
-        return state
+        self.actions = create_action_registry()
 
     def decide(self, state: CodingState) -> str:
-        """Choose the next coding action."""
+        """Decide which action to take based on the current state."""
+
+        if state.finished:
+            return "finish"
 
         if not state.files:
             return "inspect_files"
 
-        if not state.current_file:
+        if state.last_error and not state.error_inspected:
+            return "fix_error"
+
+        if (
+            state.error_inspected
+            and state.current_file
+            and state.current_file_content is None
+        ):
             return "read_file"
 
-        if state.last_error:
-            return "fix_error"
+        if (
+            state.error_inspected
+            and state.current_file_content is not None
+            and not state.repair_proposed
+        ):
+            return "propose_repair"
+
+        if state.user_input_needed:
+            return "finish"
+
+        if not state.current_file:
+            return "read_file"
 
         if not state.tests_run:
             return "run_tests"
 
         if not state.tests_passed:
-            return "fix_error"
+            state.finished = True
+            return "finish"
 
+        state.finished = True
         return "finish"
 
-    def run_once(self, state: CodingState) -> str:
-        """Run one agent decision step."""
+    def run_once(self, state: CodingState) -> ActionResult:
+        """Choose and execute one action."""
 
         action = self.decide(state)
 
-        if action == "inspect_files":
-            self.inspect(state)
-
-        elif action == "read_file":
-            self.read_current_file(state)
-
-        elif action == "finish":
+        if action == "finish":
             state.finished = True
 
-        return action
+            if state.repair_proposed and not state.repair_applied:
+                message = (
+                    "Agent stopped safely. "
+                    "Review and approve the repair proposal."
+                )
+            elif state.tests_passed:
+                message = (
+                    "Agent finished successfully. "
+                    "All tests passed."
+                )
+            else:
+                message = (
+                    "Agent stopped safely. "
+                    "Manual review is required."
+                )
+
+            return ActionResult(
+                action="finish",
+                success=True,
+                message=message,
+            )
+
+        return self.actions.execute(
+            action,
+            workspace=self.workspace,
+            state=state,
+        )
