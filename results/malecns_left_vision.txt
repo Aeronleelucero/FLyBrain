@@ -1,0 +1,1 @@
+python experiments/test_malecns.py | tee results/malecns_left_vision.txt

@@ -1,0 +1,23 @@
+Testing activation threshold...
+
+intensity=0.500 | mean=0.000 Hz | forward=0.000 | turn_left=0.000
+intensity=0.505 | mean=3.085 Hz | forward=0.031 | turn_left=0.002
+intensity=0.510 | mean=11.652 Hz | forward=0.117 | turn_left=0.010
+intensity=0.515 | mean=15.051 Hz | forward=0.151 | turn_left=0.019
+intensity=0.520 | mean=16.988 Hz | forward=0.170 | turn_left=0.020
+intensity=0.525 | mean=19.115 Hz | forward=0.191 | turn_left=0.025
+intensity=0.530 | mean=20.373 Hz | forward=0.204 | turn_left=0.026
+intensity=0.535 | mean=21.645 Hz | forward=0.216 | turn_left=0.027
+intensity=0.540 | mean=22.515 Hz | forward=0.225 | turn_left=0.029
+intensity=0.545 | mean=23.640 Hz | forward=0.236 | turn_left=0.030
+intensity=0.550 | mean=24.532 Hz | forward=0.245 | turn_left=0.031
+intensity=0.555 | mean=24.978 Hz | forward=0.250 | turn_left=0.029
+intensity=0.560 | mean=25.811 Hz | forward=0.258 | turn_left=0.032
+intensity=0.565 | mean=26.411 Hz | forward=0.264 | turn_left=0.032
+intensity=0.570 | mean=27.251 Hz | forward=0.273 | turn_left=0.030
+intensity=0.575 | mean=27.931 Hz | forward=0.279 | turn_left=0.029
+intensity=0.580 | mean=27.858 Hz | forward=0.279 | turn_left=0.035
+intensity=0.585 | mean=28.275 Hz | forward=0.283 | turn_left=0.035
+intensity=0.590 | mean=28.969 Hz | forward=0.290 | turn_left=0.031
+intensity=0.595 | mean=29.423 Hz | forward=0.294 | turn_left=0.035
+intensity=0.600 | mean=29.730 Hz | forward=0.297 | turn_left=0.032

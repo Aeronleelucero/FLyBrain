@@ -1,0 +1,73 @@
+
+======================================================================
+Left vision
+Input: left=1.0, right=0.0
+
+Descending:
+{'population': 'descending', 'time_ms': 100.0, 'window': 'since reset', 'units': 'Hz', 'modeled': True, 'count': 1368, 'mean_rate_hz': 39.5687134502924, 'left_rate_hz': 41.334310850439884, 'right_rate_hz': 35.17804154302671, 'interpretation': 'Activity of annotation-derived descending population, not an action command.', 'source': 'https://male-cns.janelia.org/download/'}
+
+Motor:
+MotorOutput(forward=0.395687134502924, turn_left=0.06156269307413176, turn_right=0.0, units='dimensionless population-rate proxy', modeled=True, interpretation='Mean descending rate / 100 Hz and signed bilateral differences; not measured movement.')
+
+======================================================================
+Right vision
+Input: left=0.0, right=1.0
+
+Descending:
+{'population': 'descending', 'time_ms': 100.0, 'window': 'since reset', 'units': 'Hz', 'modeled': True, 'count': 1368, 'mean_rate_hz': 42.87280701754386, 'left_rate_hz': 41.87683284457478, 'right_rate_hz': 41.3353115727003, 'interpretation': 'Activity of annotation-derived descending population, not an action command.', 'source': 'https://male-cns.janelia.org/download/'}
+
+Motor:
+MotorOutput(forward=0.4287280701754386, turn_left=0.005415212718744797, turn_right=0.0, units='dimensionless population-rate proxy', modeled=True, interpretation='Mean descending rate / 100 Hz and signed bilateral differences; not measured movement.')
+
+======================================================================
+Both sides
+Input: left=1.0, right=1.0
+
+Descending:
+{'population': 'descending', 'time_ms': 100.0, 'window': 'since reset', 'units': 'Hz', 'modeled': True, 'count': 1368, 'mean_rate_hz': 40.219298245614034, 'left_rate_hz': 38.240469208211145, 'right_rate_hz': 39.554896142433236, 'interpretation': 'Activity of annotation-derived descending population, not an action command.', 'source': 'https://male-cns.janelia.org/download/'}
+
+Motor:
+MotorOutput(forward=0.4021929824561403, turn_left=0.0, turn_right=0.01314426934222091, units='dimensionless population-rate proxy', modeled=True, interpretation='Mean descending rate / 100 Hz and signed bilateral differences; not measured movement.')
+
+======================================================================
+No vision
+Input: left=0.0, right=0.0
+
+Descending:
+{'population': 'descending', 'time_ms': 100.0, 'window': 'since reset', 'units': 'Hz', 'modeled': True, 'count': 1368, 'mean_rate_hz': 0.0, 'left_rate_hz': 0.0, 'right_rate_hz': 0.0, 'interpretation': 'Activity of annotation-derived descending population, not an action command.', 'source': 'https://male-cns.janelia.org/download/'}
+
+Motor:
+MotorOutput(forward=0.0, turn_left=0.0, turn_right=0.0, units='dimensionless population-rate proxy', modeled=True, interpretation='Mean descending rate / 100 Hz and signed bilateral differences; not measured movement.')
+
+======================================================================
+Balanced weak vision
+Input: left=0.5, right=0.5
+
+Descending:
+{'population': 'descending', 'time_ms': 100.0, 'window': 'since reset', 'units': 'Hz', 'modeled': True, 'count': 1368, 'mean_rate_hz': 0.0, 'left_rate_hz': 0.0, 'right_rate_hz': 0.0, 'interpretation': 'Activity of annotation-derived descending population, not an action command.', 'source': 'https://male-cns.janelia.org/download/'}
+
+Motor:
+MotorOutput(forward=0.0, turn_left=0.0, turn_right=0.0, units='dimensionless population-rate proxy', modeled=True, interpretation='Mean descending rate / 100 Hz and signed bilateral differences; not measured movement.')
+
+======================================================================
+Strong left / weak right
+Input: left=1.0, right=0.25
+
+Descending:
+{'population': 'descending', 'time_ms': 100.0, 'window': 'since reset', 'units': 'Hz', 'modeled': True, 'count': 1368, 'mean_rate_hz': 39.32017543859649, 'left_rate_hz': 41.21700879765396, 'right_rate_hz': 34.77744807121662, 'interpretation': 'Activity of annotation-derived descending population, not an action command.', 'source': 'https://male-cns.janelia.org/download/'}
+
+Motor:
+MotorOutput(forward=0.39320175438596494, turn_left=0.06439560726437342, turn_right=0.0, units='dimensionless population-rate proxy', modeled=True, interpretation='Mean descending rate / 100 Hz and signed bilateral differences; not measured movement.')
+
+======================================================================
+Weak left / strong right
+Input: left=0.25, right=1.0
+
+Descending:
+{'population': 'descending', 'time_ms': 100.0, 'window': 'since reset', 'units': 'Hz', 'modeled': True, 'count': 1368, 'mean_rate_hz': 43.530701754385966, 'left_rate_hz': 42.6099706744868, 'right_rate_hz': 41.92878338278932, 'interpretation': 'Activity of annotation-derived descending population, not an action command.', 'source': 'https://male-cns.janelia.org/download/'}
+
+Motor:
+MotorOutput(forward=0.43530701754385964, turn_left=0.006811872916974835, turn_right=0.0, units='dimensionless population-rate proxy', modeled=True, interpretation='Mean descending rate / 100 Hz and signed bilateral differences; not measured movement.')
+
+======================================================================
+Experiment complete. Cases tested: 7
