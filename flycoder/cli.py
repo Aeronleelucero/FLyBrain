@@ -77,10 +77,15 @@ def main() -> None:
         )
 
     agent = FlyCoderAgent(workspace)
-    state = CodingState(task=args.task)
+    state = CodingState(
+        task=args.task,
+        task_intent=agent.classify_task(args.task),
+    )
+
 
     print(f"Workspace: {workspace}")
     print(f"Task: {state.task}")
+    print(f"Task Intent: {state.task_intent}")
     print()
 
     for step in range(args.max_steps):
