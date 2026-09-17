@@ -23,6 +23,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
+        "--task",
+        default="Inspect and test the workspace",
+        help="Coding task for the agent",
+    )
+
+    parser.add_argument(
         "--max-steps",
         type=int,
         default=20,
@@ -71,9 +77,7 @@ def main() -> None:
         )
 
     agent = FlyCoderAgent(workspace)
-    state = CodingState(
-        task=f"Inspect and test workspace: {workspace}"
-    )
+    state = CodingState(task=args.task)
 
     print(f"Workspace: {workspace}")
     print(f"Task: {state.task}")
@@ -124,7 +128,6 @@ def main() -> None:
                     state.finished = True
                     break
 
-                # Continue the loop so tests run again.
                 continue
 
             print()
@@ -139,6 +142,7 @@ def main() -> None:
 
     print()
     print("Final state:")
+    print(f"  Task: {state.task}")
     print(f"  Tests run: {state.tests_run}")
     print(f"  Tests passed: {state.tests_passed}")
     print(f"  Repair proposed: {state.repair_proposed}")
