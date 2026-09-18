@@ -1,21 +1,109 @@
-MIT License
+FlyBrain Source-Available Non-Commercial License
 
-Copyright (c) 2026 FlyBrain contributors
+Copyright (c) 2026 The original author of FlyBrain (the "Copyright Holder").
+All rights reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+This is a custom source-available license. It is not an open-source license
+approved by the Open Source Initiative, and it does not grant unrestricted
+rights to use, distribute, or commercialize FlyBrain.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+1. Definitions
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+"FlyBrain" means the original source code, documentation, and materials made
+available in the official FlyBrain repository, excluding Third-Party Materials.
+"Official Repository" means the repository identified and administered by the
+Copyright Holder as the official FlyBrain project.
+"Modified Version" means a local copy of FlyBrain changed by a recipient.
+"Non-Commercial Purpose" means personal, educational, academic, charitable, or
+non-commercial research use that is not primarily intended for or directed
+toward commercial advantage or monetary compensation.
+"Third-Party Materials" means datasets, models, credentials, keys,
+infrastructure, and other materials owned by someone other than the Copyright
+Holder or governed by separate terms.
+
+2. Limited Permission
+
+Subject to this license, the Copyright Holder grants you a non-exclusive,
+non-transferable, non-sublicensable, revocable permission to clone, download,
+install, run, study, and make private local copies and modifications of
+FlyBrain solely for a Non-Commercial Purpose. You may keep private forks or
+copies for those permitted purposes.
+
+Your Modified Version remains your work to the extent of your original changes,
+but it incorporates FlyBrain and remains subject to this license. This license
+does not transfer ownership of the original FlyBrain source code or grant any
+right in the Official Repository.
+
+3. Restrictions
+
+Except with the Copyright Holder's explicit prior written permission, you may
+not:
+
+a. use FlyBrain or a Modified Version for any commercial purpose;
+b. sell, rent, lease, license, sublicense, monetize, or otherwise commercially
+	exploit FlyBrain or a Modified Version;
+c. distribute, publish, republish, host, make available, repackage, or provide
+	FlyBrain or a Modified Version to any third party, including as a package,
+	service, container image, repository, mirror, or derivative project;
+d. represent, market, or present FlyBrain or a Modified Version as your own
+	project or as an official version of FlyBrain;
+e. remove, obscure, or alter any copyright, license, attribution, provenance,
+	or other proprietary notice; or
+f. claim authorship of the original FlyBrain source code.
+
+4. Name, Branding, and Official Project
+
+The FlyBrain name, logo, branding, identity, and the Official Repository are
+controlled by the Copyright Holder. This license grants no trademark, branding,
+endorsement, or affiliation rights. You must not use them in a way that implies
+that a fork, copy, Modified Version, or activity is official, endorsed by, or
+affiliated with FlyBrain or the Copyright Holder. Only the Copyright Holder
+controls the Official Repository and official releases.
+
+5. Contributions
+
+Contributions submitted to the Official Repository are governed by
+CONTRIBUTING.md. By submitting a contribution, you represent that you have the
+right to submit it and grant the Copyright Holder a perpetual, worldwide,
+non-exclusive, irrevocable, royalty-free, sublicensable license to use,
+reproduce, modify, distribute, publicly display, publicly perform, and
+relicense that contribution as part of FlyBrain. No contribution grants the
+contributor administration, ownership, trademark, or release rights in the
+Official Repository.
+
+6. Third-Party Materials and No Credential Grant
+
+This license grants no rights to Third-Party Materials. Downloaded datasets and
+models may be governed by their own licenses, attribution obligations, or use
+restrictions. No right is granted to any private credential, API key, token,
+password, cloud account, infrastructure, proprietary model, or material that
+is accidentally exposed, separately owned, or not intentionally licensed by
+the Copyright Holder. You must not use or disclose such material.
+
+7. No Warranty; Limitation of Liability
+
+FLYBRAIN IS PROVIDED "AS IS" AND "AS AVAILABLE," WITHOUT WARRANTIES OR
+CONDITIONS OF ANY KIND, WHETHER EXPRESS, IMPLIED, STATUTORY, OR OTHERWISE,
+INCLUDING WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE,
+TITLE, NON-INFRINGEMENT, ACCURACY, OR AVAILABILITY. TO THE MAXIMUM EXTENT
+PERMITTED BY LAW, THE COPYRIGHT HOLDER AND CONTRIBUTORS WILL NOT BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, CONSEQUENTIAL, OR OTHER
+DAMAGES ARISING FROM OR RELATED TO FLYBRAIN, ITS USE, OR THIS LICENSE, EVEN IF
+ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
+
+8. Termination
+
+This license terminates automatically if you violate any of its terms. Upon
+termination, you must stop using FlyBrain and destroy all copies in your
+possession or control, except where retention is required by law. Sections 3
+through 8 survive termination.
+
+9. General
+
+The Copyright Holder reserves all rights not expressly granted by this license.
+Any permission or waiver must be in writing and signed by the Copyright Holder.
+If any provision is unenforceable, the remaining provisions remain in effect to
+the fullest extent permitted by law.
+
+Before relying on this license for commercial enforcement, the Copyright Holder
+should obtain advice from qualified legal counsel in the relevant jurisdiction.

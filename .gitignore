@@ -10,3 +10,20 @@ dist/
 *.npz
 *.npy
 *.part
+
+# Local environment files and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+id_rsa
+id_ed25519
+credentials.json
+service-account*.json
+secrets/
+.secrets/
