@@ -2,6 +2,11 @@
 
 from dataclasses import dataclass, field
 
+from flycoder.tools.code_paths import CodePath
+from flycoder.tools.complexity import ComplexityInfo
+from flycoder.tools.control_flow import ControlFlowNode
+from flycoder.tools.data_flow import DataFlowInfo
+from flycoder.tools.references import ReferenceInfo
 from flycoder.tools.symbols import (
     CallInfo,
     DecoratorInfo,
@@ -23,47 +28,28 @@ class CodingState:
     # Task
     # ----------------------------------------------------------
 
-    # The agent classifies the task during initialization.
     task_intent: str | None = None
 
     # ----------------------------------------------------------
     # File discovery and selection
     # ----------------------------------------------------------
 
-    # All files discovered in the workspace.
     files: list[str] = field(default_factory=list)
 
-    # Files selected as relevant to the current task.
     relevant_files: list[str] = field(default_factory=list)
 
-    # Files that have already been analyzed.
-    files_analyzed: list[str] = field(
-        default_factory=list
-    )
+    files_analyzed: list[str] = field(default_factory=list)
 
     # ----------------------------------------------------------
     # Code review
     # ----------------------------------------------------------
 
-    # Aggregated results from code reviews.
-    review_findings: list[dict] = field(
-        default_factory=list
-    )
+    review_findings: list[dict] = field(default_factory=list)
 
     # ----------------------------------------------------------
     # Dependency analysis
     # ----------------------------------------------------------
 
-    # Local Python dependency graph.
-    #
-    # Example:
-    #
-    # {
-    #     "flycoder/agent.py": [
-    #         "flycoder/state.py",
-    #         "flycoder/tools/filesystem.py",
-    #     ]
-    # }
     dependency_graph: dict[str, list[str]] = field(
         default_factory=dict
     )
@@ -72,38 +58,57 @@ class CodingState:
     # Symbol intelligence
     # ----------------------------------------------------------
 
-    # Symbols discovered during AST analysis.
-    symbols: list[Symbol] = field(
-        default_factory=list
-    )
+    symbols: list[Symbol] = field(default_factory=list)
 
-    # Imports discovered during AST analysis.
     symbol_imports: list[ImportInfo] = field(
         default_factory=list
     )
 
-    # Function and method calls discovered during AST analysis.
-    symbol_calls: list[CallInfo] = field(
-        default_factory=list
-    )
+    symbol_calls: list[CallInfo] = field(default_factory=list)
 
-    # Class inheritance relationships discovered during AST analysis.
     symbol_inheritance: list[InheritanceInfo] = field(
         default_factory=list
     )
 
-    # Decorators discovered during AST analysis.
     symbol_decorators: list[DecoratorInfo] = field(
         default_factory=list
     )
 
-    # Combined symbol relationships.
     symbol_relationships: list[Relationship] = field(
         default_factory=list
     )
 
-    # Queryable symbol relationship graph.
     symbol_graph: SymbolGraph | None = None
+
+    # ----------------------------------------------------------
+    # Code intelligence
+    # ----------------------------------------------------------
+
+    # Control-flow structures discovered during AST analysis.
+    control_flow: list[ControlFlowNode] = field(
+        default_factory=list
+    )
+
+    # Variable, attribute, and call references discovered during
+    # AST analysis.
+    symbol_references: list[ReferenceInfo] = field(
+        default_factory=list
+    )
+
+    # Approximate source-to-target data-flow relationships.
+    data_flow: list[DataFlowInfo] = field(
+        default_factory=list
+    )
+
+    # Per-function complexity metrics.
+    complexity_metrics: list[ComplexityInfo] = field(
+        default_factory=list
+    )
+
+    # Approximate execution-path information.
+    code_paths: list[CodePath] = field(
+        default_factory=list
+    )
 
     # ----------------------------------------------------------
     # Current file

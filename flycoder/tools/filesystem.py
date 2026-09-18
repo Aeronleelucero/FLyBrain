@@ -62,7 +62,7 @@ class Workspace:
             if path.suffix.lower() in ignored_extensions:
                 continue
 
-            files.append(str(relative_path))
+            files.append(relative_path.as_posix())
 
         return sorted(files)
 
