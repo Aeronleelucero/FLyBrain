@@ -48,7 +48,7 @@ REGISTRY = {
         "checksums": {"connections.feather": "md5:f48f972d262323a102aed49af1396b8a"},
     },
     "synthetic": {
-        "version": "1", "license": "MIT", "source": "built-in test fixture",
+        "version": "1", "license": "FlyBrain Source-Available Non-Commercial License", "source": "built-in test fixture",
         "citations": [], "files": {}, "synthetic": True,
     },
 }

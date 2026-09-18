@@ -24,5 +24,5 @@ Keep application actions in adapters; never map BUY/FIRE/JUMP in neuron code.
 - Preserve sparse connectivity (post rows / pre columns); no dense N×N matrices.
 - Keep dynamics separate from raw topology; retain data licenses and source hashes.
 - Never silently substitute synthetic data for failed real data loading.
-- Code is MIT. Dataset licenses remain independent. No third-party source vendoring.
+- Code uses the custom FlyBrain Source-Available Non-Commercial License. Dataset licenses remain independent. No third-party source vendoring.
 - PyPI publishing, CUDA, calibrated retina/motor models and 3D are not implemented.

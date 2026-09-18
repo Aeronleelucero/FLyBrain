@@ -1,13 +1,13 @@
 # Dataset provenance and licenses
 
-Code is MIT; downloaded data retains its own terms and attribution. No real
+FlyBrain code is available under its custom source-available license; downloaded data retains its own terms and attribution. No real
 connectome is distributed in this repository or package.
 
 | Backend | Version | Source/terms |
 | --- | --- | --- |
 | `malecns` | 1.0, min confidence 0.5 | [Janelia bulk data](https://male-cns.janelia.org/download/), CC-BY-4.0 |
 | `flywire` / `fafb` | FAFB 783; annotation release 2.1.0 | [Zenodo connectivity](https://zenodo.org/records/10676866), CC-BY-4.0 for this deposit; [public annotation guidelines](https://flywire.ai/guidelines), CC BY-NC 4.0 |
-| `synthetic` | 1 | Handwritten 10-neuron fixture, MIT; no biological provenance claim |
+| `synthetic` | 1 | Handwritten 10-neuron fixture, covered by the FlyBrain license; no biological provenance claim |
 
 MaleCNS includes the CNS; FlyWire FAFB is the female brain and is not a complete
 motor/body connectome. Descending activity is a readout of annotated populations.

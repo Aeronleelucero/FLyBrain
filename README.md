@@ -42,6 +42,25 @@ See [API guide](docs/API.md), [data and licenses](docs/DATASETS.md),
 [research](docs/RESEARCH.md), [architecture](ARCHITECTURE.md), and
 [agent integration rules](AGENTS.md).
 
+## License & Usage
+
+This repository is intentionally public so people can inspect, clone, run, and
+privately modify FlyBrain for personal, educational, and non-commercial research
+use. Public visibility does not mean unrestricted commercial rights.
+
+FlyBrain is publicly available for personal, educational, and non-commercial
+research use. You may clone and modify your own copy under the terms of the
+FlyBrain license. Commercial use, redistribution, repackaging, and presenting
+FlyBrain as your own project require explicit permission from the copyright
+holder.
+
+Private forks and local copies are allowed only within the license terms. The
+official FlyBrain project and repository are maintained by the original author.
+The FlyBrain name, branding, and official-project identity may not be used to
+imply that a fork or modification is official. Read the custom
+[source-available license](LICENSE), which is not an OSI-approved open-source
+license, before using the project.
+
 ## Included in this MVP
 
 - Official MaleCNS and FlyWire loaders, verified downloads, sparse caches and provenance.
