@@ -108,6 +108,101 @@ class FlyCoderAgent:
         if not state.task_intent:
             state.task_intent = self.classify_task(state.task)
 
+    @staticmethod
+    def select_relevant_files(
+        task: str,
+        files: list[str],
+        max_files: int = 5,
+    ) -> list[str]:
+        """Select the files most relevant to the user's task."""
+
+        if not files:
+            return []
+
+        task_words = {
+            word.strip(".,:;!?()[]{}\"'")
+            for word in task.lower().split()
+            if len(word.strip(".,:;!?()[]{}\"'")) >= 3
+        }
+
+        ignored_words = {
+            "the",
+            "this",
+            "that",
+            "with",
+            "from",
+            "into",
+            "code",
+            "file",
+            "files",
+            "project",
+            "review",
+            "improve",
+            "explain",
+            "inspect",
+            "fix",
+            "debug",
+        }
+
+        task_words -= ignored_words
+
+        if not task_words:
+            return files[:max_files]
+
+        scored_files: list[tuple[int, str]] = []
+
+        for file_path in files:
+            normalized_path = file_path.lower()
+
+            path_words = set(
+                normalized_path
+                .replace("/", " ")
+                .replace("_", " ")
+                .replace("-", " ")
+                .replace(".", " ")
+                .split()
+            )
+
+            score = 0
+
+            for word in task_words:
+                if word in path_words:
+                    score += 5
+                elif word in normalized_path:
+                    score += 2
+
+            # Prioritize FLY-CODER's own implementation.
+            if normalized_path.startswith("flycoder/"):
+                score += 2
+
+            # Prefer Python source files.
+            if normalized_path.endswith(".py"):
+                score += 2
+
+            # Tests get additional relevance when the task mentions tests.
+            if (
+                "test" in task_words
+                and "/tests/" in f"/{normalized_path}/"
+            ):
+                score += 4
+
+            # Don't let experiments outrank core implementation
+            # for generic coding-agent tasks.
+            if normalized_path.startswith("experiments/"):
+                score -= 2
+
+            scored_files.append((score, file_path))
+
+        scored_files.sort(
+            key=lambda item: (-item[0], item[1])
+        )
+
+        return [
+            file_path
+            for score, file_path in scored_files[:max_files]
+            if score > 0
+        ]
+
     def decide(self, state: CodingState) -> str:
         """Choose the next action based on the current state."""
 
@@ -128,7 +223,14 @@ class FlyCoderAgent:
             "improve",
         }:
             if not state.current_file:
-                return "read_file"
+                selected_files = self.select_relevant_files(
+                    state.task,
+                    state.files,
+                    max_files=5,
+                )
+
+                if selected_files:
+                    state.current_file = selected_files[0]
 
             if state.current_file_content is None:
                 return "read_file"
@@ -243,7 +345,6 @@ class FlyCoderAgent:
             else:
                 print("  No specific improvements were identified.")
 
-        # Analysis actions are one-shot operations.
         if action in self.ANALYSIS_ACTIONS:
             state.finished = True
 
@@ -310,15 +411,12 @@ def cli() -> None:
         if result.message:
             print(f"  {result.message}")
 
-        # Do not print analysis data twice because run_once()
-        # already prints readable analysis output.
         if (
             result.data
             and result.action not in FlyCoderAgent.ANALYSIS_ACTIONS
         ):
             print(f"  data={result.data}")
 
-        # Optional automatic approval.
         if (
             args.approve
             and state.repair_proposed
