@@ -9,7 +9,7 @@ def approve_repair_action(
     workspace: Workspace,
     state: CodingState,
 ) -> ActionResult:
-    """Apply an approved repair proposal."""
+    """Apply an approved repair proposal safely."""
 
     if not state.repair_proposed:
         return ActionResult(
@@ -32,7 +32,36 @@ def approve_repair_action(
             message="No proposed content is available.",
         )
 
-    workspace.write_file(
+    # Re-read the file before applying the proposal. This prevents an old
+    # proposal from overwriting changes made after the proposal was created.
+    current_content = workspace.read_file(state.current_file)
+
+    if (
+        state.current_file_content is None
+        or current_content != state.current_file_content
+    ):
+        state.repair_approved = False
+        state.repair_applied = False
+        state.user_input_needed = True
+
+        return ActionResult(
+            action="approve_repair",
+            success=False,
+            message=(
+                "Repair approval rejected because the file changed "
+                "after the proposal was created. A new proposal is required."
+            ),
+            data={
+                "file": state.current_file,
+                "stale_proposal": True,
+                "requires_new_proposal": True,
+            },
+        )
+
+    # Preserve the exact pre-change content for rollback.
+    state.repair_original_content = current_content
+
+    workspace.atomic_write_file(
         relative_path=state.current_file,
         content=state.proposed_content,
     )
