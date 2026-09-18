@@ -144,6 +144,10 @@ class CodingState:
 
     proposed_content: str | None = None
 
+    # Original content from the most recently applied repair.
+    # Used to support safe rollback during the current agent run.
+    repair_original_content: str | None = None
+
     # ----------------------------------------------------------
     # Agent control
     # ----------------------------------------------------------

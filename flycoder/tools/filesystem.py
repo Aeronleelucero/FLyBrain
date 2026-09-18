@@ -1,5 +1,7 @@
 """Safe filesystem tools for FLY-CODER."""
 
+import os
+import tempfile
 from pathlib import Path
 
 
@@ -82,3 +84,39 @@ class Workspace:
         path = self._safe_path(relative_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
+
+    def atomic_write_file(
+        self,
+        relative_path: str,
+        content: str,
+    ) -> None:
+        """Atomically replace a text file inside the workspace."""
+
+        path = self._safe_path(relative_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        temporary_path: Path | None = None
+
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=path.parent,
+                prefix=f".{path.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as temporary_file:
+                temporary_path = Path(temporary_file.name)
+                temporary_file.write(content)
+                temporary_file.flush()
+                os.fsync(temporary_file.fileno())
+
+            os.replace(temporary_path, path)
+            temporary_path = None
+
+        finally:
+            if temporary_path is not None:
+                try:
+                    temporary_path.unlink()
+                except FileNotFoundError:
+                    pass

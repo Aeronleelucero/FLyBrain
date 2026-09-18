@@ -2,6 +2,10 @@
 
 from flycoder.actions.registry import ActionResult
 from flycoder.state import CodingState
+from flycoder.tools.changes import (
+    build_change_diff,
+    create_change_proposal,
+)
 from flycoder.tools.filesystem import Workspace
 
 
@@ -36,7 +40,7 @@ def propose_repair_action(
             'assert True, "Intentional failure for testing"',
         )
 
-        state.repair_description = (
+        description = (
             "Replace the intentional failing assertion "
             "with a passing assertion."
         )
@@ -57,8 +61,28 @@ def propose_repair_action(
             },
         )
 
-    state.proposed_content = proposed_content
+    proposal = create_change_proposal(
+        file=state.current_file,
+        original_content=content,
+        proposed_content=proposed_content,
+        description=description,
+    )
+
+    if not proposal.changed:
+        return ActionResult(
+            action="propose_repair",
+            success=False,
+            message="The repair proposal contains no changes.",
+            data={
+                "file": state.current_file,
+            },
+        )
+
+    state.repair_description = proposal.description
+    state.proposed_content = proposal.proposed_content
     state.repair_proposed = True
+    state.repair_approved = False
+    state.repair_applied = False
     state.user_input_needed = True
 
     return ActionResult(
@@ -66,10 +90,11 @@ def propose_repair_action(
         success=True,
         message="Repair proposal created. No file was modified.",
         data={
-            "file": state.current_file,
-            "description": state.repair_description,
-            "original_content": content,
-            "proposed_content": proposed_content,
+            "file": proposal.file,
+            "description": proposal.description,
+            "original_content": proposal.original_content,
+            "proposed_content": proposal.proposed_content,
+            "diff": build_change_diff(proposal),
             "requires_approval": True,
         },
     )
