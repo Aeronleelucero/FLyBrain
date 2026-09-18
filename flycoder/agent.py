@@ -10,7 +10,10 @@ from flycoder.actions.registry import ActionResult
 from flycoder.state import CodingState
 from flycoder.tools.dependencies import build_dependency_graph
 from flycoder.tools.filesystem import Workspace
-from flycoder.tools.symbols import analyze_symbols
+from flycoder.tools.symbols import (
+    analyze_symbols,
+    build_symbol_report,
+)
 
 
 class FlyCoderAgent:
@@ -647,6 +650,40 @@ class FlyCoderAgent:
         print()
 
     # ==============================================================
+    # SYMBOL REPORT
+    # ==============================================================
+
+    def print_symbol_report(
+        self,
+        state: CodingState,
+    ) -> None:
+        """Print the discovered project symbol intelligence."""
+
+        if not (
+            state.symbols
+            or state.symbol_imports
+            or state.symbol_calls
+            or state.symbol_inheritance
+            or state.symbol_decorators
+            or state.symbol_relationships
+        ):
+            return
+
+        report = build_symbol_report(
+            symbols=state.symbols,
+            imports=state.symbol_imports,
+            calls=state.symbol_calls,
+            inheritance=state.symbol_inheritance,
+            decorators=state.symbol_decorators,
+            relationships=state.symbol_relationships,
+        )
+
+        print()
+        print(report)
+        print()
+
+
+    # ==============================================================
     # DEPENDENCY REPORT
     # ==============================================================
 
@@ -715,6 +752,10 @@ class FlyCoderAgent:
 
             if state.task_intent == "review":
                 self.print_review_report(
+                    state
+                )
+
+                self.print_symbol_report(
                     state
                 )
 

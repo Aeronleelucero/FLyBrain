@@ -626,3 +626,228 @@ def find_symbols_by_kind(
         for symbol in symbols
         if symbol.kind == kind
     ]
+def build_symbol_report(
+    symbols: list[Symbol],
+    imports: list[ImportInfo] | None = None,
+    calls: list[CallInfo] | None = None,
+    inheritance: list[InheritanceInfo] | None = None,
+    decorators: list[DecoratorInfo] | None = None,
+    relationships: list[Relationship] | None = None,
+) -> str:
+    """Build a readable report from discovered symbol intelligence."""
+
+    imports = imports or []
+    calls = calls or []
+    inheritance = inheritance or []
+    decorators = decorators or []
+    relationships = relationships or []
+
+    lines: list[str] = []
+
+    files = sorted(
+        {
+            symbol.file
+            for symbol in symbols
+        }
+        | {
+            item.file
+            for item in imports
+        }
+        | {
+            item.file
+            for item in calls
+        }
+        | {
+            item.file
+            for item in inheritance
+        }
+        | {
+            item.file
+            for item in decorators
+        }
+    )
+
+    if not files:
+        files = ["<unknown>"]
+
+    for file_path in files:
+        lines.append("=" * 60)
+        lines.append("FLY-CODER SYMBOL REPORT")
+        lines.append("=" * 60)
+        lines.append("")
+        lines.append(f"File: {file_path}")
+        lines.append("")
+
+        file_symbols = [
+            symbol
+            for symbol in symbols
+            if symbol.file == file_path
+        ]
+
+        file_imports = [
+            item
+            for item in imports
+            if item.file == file_path
+        ]
+
+        file_calls = [
+            item
+            for item in calls
+            if item.file == file_path
+        ]
+
+        file_inheritance = [
+            item
+            for item in inheritance
+            if item.file == file_path
+        ]
+
+        file_decorators = [
+            item
+            for item in decorators
+            if item.file == file_path
+        ]
+
+        file_relationships = [
+            item
+            for item in relationships
+            if item.file == file_path
+        ]
+
+        lines.append(
+            f"Symbols: {len(file_symbols)}"
+        )
+
+        if file_symbols:
+            lines.append("")
+
+            for symbol in file_symbols:
+                location = (
+                    f"{symbol.line}-{symbol.end_line}"
+                )
+
+                if symbol.parent:
+                    lines.append(
+                        f"  {symbol.kind:<10}"
+                        f"{symbol.name} "
+                        f"[{location}] "
+                        f"parent={symbol.parent}"
+                    )
+                else:
+                    lines.append(
+                        f"  {symbol.kind:<10}"
+                        f"{symbol.name} "
+                        f"[{location}]"
+                    )
+        else:
+            lines.append(
+                "  No symbols detected."
+            )
+
+        lines.append("")
+        lines.append(
+            f"Imports: {len(file_imports)}"
+        )
+
+        if file_imports:
+            for item in file_imports:
+                imported_name = (
+                    item.name
+                    if item.name is not None
+                    else item.module
+                )
+
+                alias = (
+                    f" as {item.alias}"
+                    if item.alias
+                    else ""
+                )
+
+                lines.append(
+                    f"  {imported_name}{alias} "
+                    f"[line {item.line}]"
+                )
+        else:
+            lines.append(
+                "  No imports detected."
+            )
+
+        lines.append("")
+        lines.append(
+            f"Calls: {len(file_calls)}"
+        )
+
+        if file_calls:
+            for item in file_calls:
+                parent = (
+                    f" in {item.parent}"
+                    if item.parent
+                    else ""
+                )
+
+                lines.append(
+                    f"  {item.name}{parent} "
+                    f"[line {item.line}]"
+                )
+        else:
+            lines.append(
+                "  No calls detected."
+            )
+
+        lines.append("")
+        lines.append(
+            f"Inheritance: {len(file_inheritance)}"
+        )
+
+        if file_inheritance:
+            for item in file_inheritance:
+                lines.append(
+                    f"  {item.class_name} "
+                    f"-> {item.base_name} "
+                    f"[line {item.line}]"
+                )
+        else:
+            lines.append(
+                "  No inheritance detected."
+            )
+
+        lines.append("")
+        lines.append(
+            f"Decorators: {len(file_decorators)}"
+        )
+
+        if file_decorators:
+            for item in file_decorators:
+                lines.append(
+                    f"  {item.symbol_name} "
+                    f"-> @{item.decorator_name} "
+                    f"[line {item.line}]"
+                )
+        else:
+            lines.append(
+                "  No decorators detected."
+            )
+
+        lines.append("")
+        lines.append(
+            f"Relationships: {len(file_relationships)}"
+        )
+
+        if file_relationships:
+            for item in file_relationships:
+                lines.append(
+                    f"  {item.source} "
+                    f"--{item.relation}--> "
+                    f"{item.target} "
+                    f"[line {item.line}]"
+                )
+        else:
+            lines.append(
+                "  No relationships detected."
+            )
+
+        lines.append("")
+        lines.append("=" * 60)
+        lines.append("")
+
+    return "\n".join(lines).rstrip()

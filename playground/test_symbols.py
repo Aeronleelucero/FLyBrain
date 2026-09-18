@@ -6,20 +6,23 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+
+from flycoder.state import CodingState
 from flycoder.tools.symbols import (
-    DecoratorInfo,
     CallInfo,
-    InheritanceInfo,
+    DecoratorInfo,
     ImportInfo,
+    InheritanceInfo,
     Relationship,
     Symbol,
     SymbolGraph,
     analyze_calls,
     analyze_decorators,
     analyze_imports,
-    analyze_relationships,
     analyze_inheritance,
+    analyze_relationships,
     analyze_symbols,
+    build_symbol_report,
     find_symbols_by_kind,
 )
 
@@ -1073,6 +1076,7 @@ def test_coding_state_accepts_symbol_graph():
         "helper",
     ]
 
+
 def test_review_code_populates_symbol_state():
     from flycoder.actions.analysis_actions import review_code_action
     from flycoder.state import CodingState
@@ -1088,7 +1092,10 @@ def test_review_code_populates_symbol_state():
         ),
     )
 
-    result = review_code_action(None, state)
+    result = review_code_action(
+        None,
+        state,
+    )
 
     assert result.success is True
 
@@ -1100,7 +1107,11 @@ def test_review_code_populates_symbol_state():
     assert len(state.symbol_relationships) == 2
 
     assert state.symbol_graph is not None
-    assert state.symbol_graph.get_callees("run") == ["os.getcwd"]
+    assert state.symbol_graph.get_callees(
+        "run",
+    ) == [
+        "os.getcwd",
+    ]
 
 
 def test_review_code_does_not_duplicate_symbol_state():
@@ -1118,37 +1129,62 @@ def test_review_code_does_not_duplicate_symbol_state():
         current_file_content=content,
     )
 
-    first = review_code_action(None, state)
+    first = review_code_action(
+        None,
+        state,
+    )
+
     assert first.success is True
 
-    first_symbol_count = len(state.symbols)
-    first_relationship_count = len(state.symbol_relationships)
+    first_symbol_count = len(
+        state.symbols
+    )
 
-    second = review_code_action(None, state)
+    first_relationship_count = len(
+        state.symbol_relationships
+    )
+
+    second = review_code_action(
+        None,
+        state,
+    )
+
     assert second.success is True
 
     assert len(state.symbols) == first_symbol_count
-    assert len(state.symbol_relationships) == first_relationship_count
+    assert (
+        len(state.symbol_relationships)
+        == first_relationship_count
+    )
 
-def test_relevant_files_use_symbol_matching(tmp_path):
+
+def test_relevant_files_use_symbol_matching(
+    tmp_path,
+):
     from flycoder.agent import FlyCoderAgent
 
     workspace_root = tmp_path
 
-    (workspace_root / "agent.py").write_text(
+    (
+        workspace_root / "agent.py"
+    ).write_text(
         "class Agent:\n"
         "    def run(self):\n"
         "        pass\n",
         encoding="utf-8",
     )
 
-    (workspace_root / "other.py").write_text(
+    (
+        workspace_root / "other.py"
+    ).write_text(
         "def helper():\n"
         "    pass\n",
         encoding="utf-8",
     )
 
-    agent = FlyCoderAgent(workspace_root)
+    agent = FlyCoderAgent(
+        workspace_root
+    )
 
     selected = agent.select_relevant_files(
         "Review the Agent",
@@ -1163,24 +1199,32 @@ def test_relevant_files_use_symbol_matching(tmp_path):
     assert selected[0] == "agent.py"
 
 
-def test_relevant_files_find_symbolgraph(tmp_path):
+def test_relevant_files_find_symbolgraph(
+    tmp_path,
+):
     from flycoder.agent import FlyCoderAgent
 
     workspace_root = tmp_path
 
-    (workspace_root / "symbols.py").write_text(
+    (
+        workspace_root / "symbols.py"
+    ).write_text(
         "class SymbolGraph:\n"
         "    pass\n",
         encoding="utf-8",
     )
 
-    (workspace_root / "other.py").write_text(
+    (
+        workspace_root / "other.py"
+    ).write_text(
         "class SomethingElse:\n"
         "    pass\n",
         encoding="utf-8",
     )
 
-    agent = FlyCoderAgent(workspace_root)
+    agent = FlyCoderAgent(
+        workspace_root
+    )
 
     selected = agent.select_relevant_files(
         "Review the SymbolGraph",
@@ -1210,3 +1254,93 @@ def test_relevant_files_preserve_backward_compatibility():
 
     assert selected
     assert selected[0] == "flycoder/agent.py"
+
+
+def test_build_symbol_report():
+    content = (
+        "import os\n\n"
+        "class Service:\n"
+        "    @staticmethod\n"
+        "    def run():\n"
+        "        os.getcwd()\n"
+    )
+
+    symbols = analyze_symbols(
+        content,
+        "service.py",
+    )
+
+    imports = analyze_imports(
+        content,
+        "service.py",
+    )
+
+    calls = analyze_calls(
+        content,
+        "service.py",
+    )
+
+    inheritance = analyze_inheritance(
+        content,
+        "service.py",
+    )
+
+    decorators = analyze_decorators(
+        content,
+        "service.py",
+    )
+
+    relationships = analyze_relationships(
+        content,
+        "service.py",
+    )
+
+    report = build_symbol_report(
+        symbols=symbols,
+        imports=imports,
+        calls=calls,
+        inheritance=inheritance,
+        decorators=decorators,
+        relationships=relationships,
+    )
+
+    assert "FLY-CODER SYMBOL REPORT" in report
+    assert "File: service.py" in report
+    assert "class" in report
+    assert "Service" in report
+    assert "method" in report
+    assert "run" in report
+    assert "Imports: 1" in report
+    assert "Calls: 1" in report
+    assert "Decorators: 1" in report
+    assert "os.getcwd" in report
+    assert "run --calls--> os.getcwd" in report
+
+def print_symbol_report(
+    self,
+    state: CodingState,
+) -> None:
+    """Print the discovered project symbol intelligence."""
+
+    if not (
+        state.symbols
+        or state.symbol_imports
+        or state.symbol_calls
+        or state.symbol_inheritance
+        or state.symbol_decorators
+        or state.symbol_relationships
+    ):
+        return
+
+    report = build_symbol_report(
+        symbols=state.symbols,
+        imports=state.symbol_imports,
+        calls=state.symbol_calls,
+        inheritance=state.symbol_inheritance,
+        decorators=state.symbol_decorators,
+        relationships=state.symbol_relationships,
+    )
+
+    print()
+    print(report)
+    print()
