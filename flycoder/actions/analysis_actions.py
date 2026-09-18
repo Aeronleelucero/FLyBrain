@@ -3,6 +3,15 @@
 from flycoder.actions.registry import ActionResult
 from flycoder.state import CodingState
 from flycoder.tools.filesystem import Workspace
+from flycoder.tools.symbols import (
+    SymbolGraph,
+    analyze_calls,
+    analyze_decorators,
+    analyze_imports,
+    analyze_inheritance,
+    analyze_relationships,
+    analyze_symbols,
+)
 
 
 def explain_error_action(
@@ -48,11 +57,104 @@ def explain_error_action(
     )
 
 
+def _analyze_current_file_symbols(
+    state: CodingState,
+) -> dict:
+    """Analyze the currently selected file with the Phase 3 symbol tools."""
+
+    if not state.current_file:
+        return {}
+
+    if state.current_file_content is None:
+        return {}
+
+    file_path = state.current_file
+    content = state.current_file_content
+
+    symbols = analyze_symbols(
+        content,
+        file_path=file_path,
+    )
+    imports = analyze_imports(
+        content,
+        file_path=file_path,
+    )
+    calls = analyze_calls(
+        content,
+        file_path=file_path,
+    )
+    inheritance = analyze_inheritance(
+        content,
+        file_path=file_path,
+    )
+    decorators = analyze_decorators(
+        content,
+        file_path=file_path,
+    )
+    relationships = analyze_relationships(
+        content,
+        file_path=file_path,
+    )
+
+    # Replace symbol intelligence for this file rather than
+    # duplicating entries when the same file is analyzed again.
+    state.symbols = [
+        item
+        for item in state.symbols
+        if item.file != file_path
+    ]
+    state.symbol_imports = [
+        item
+        for item in state.symbol_imports
+        if item.file != file_path
+    ]
+    state.symbol_calls = [
+        item
+        for item in state.symbol_calls
+        if item.file != file_path
+    ]
+    state.symbol_inheritance = [
+        item
+        for item in state.symbol_inheritance
+        if item.file != file_path
+    ]
+    state.symbol_decorators = [
+        item
+        for item in state.symbol_decorators
+        if item.file != file_path
+    ]
+    state.symbol_relationships = [
+        item
+        for item in state.symbol_relationships
+        if item.file != file_path
+    ]
+
+    state.symbols.extend(symbols)
+    state.symbol_imports.extend(imports)
+    state.symbol_calls.extend(calls)
+    state.symbol_inheritance.extend(inheritance)
+    state.symbol_decorators.extend(decorators)
+    state.symbol_relationships.extend(relationships)
+
+    state.symbol_graph = SymbolGraph(
+        state.symbol_relationships,
+    )
+
+    return {
+        "symbols": symbols,
+        "imports": imports,
+        "calls": calls,
+        "inheritance": inheritance,
+        "decorators": decorators,
+        "relationships": relationships,
+    }
+
+
 def review_code_action(
     workspace: Workspace,
     state: CodingState,
 ) -> ActionResult:
-    """Perform a basic static review of the selected Python file."""
+    """Perform static review and Phase 3 symbol analysis."""
 
     if not state.current_file:
         return ActionResult(
@@ -103,6 +205,8 @@ def review_code_action(
             "by the current rules."
         )
 
+    symbol_data = _analyze_current_file_symbols(state)
+
     # Store the result for the final project-level report.
     state.review_findings.append(
         {
@@ -120,12 +224,22 @@ def review_code_action(
     return ActionResult(
         action="review_code",
         success=True,
-        message="Code review completed.",
+        message="Code review and symbol analysis completed.",
         data={
             "file": state.current_file,
             "lines": len(lines),
             "findings": findings,
             "review": review,
+            "symbol_counts": {
+                "symbols": len(symbol_data.get("symbols", [])),
+                "imports": len(symbol_data.get("imports", [])),
+                "calls": len(symbol_data.get("calls", [])),
+                "inheritance": len(symbol_data.get("inheritance", [])),
+                "decorators": len(symbol_data.get("decorators", [])),
+                "relationships": len(
+                    symbol_data.get("relationships", [])
+                ),
+            },
         },
     )
 

@@ -2,6 +2,16 @@
 
 from dataclasses import dataclass, field
 
+from flycoder.tools.symbols import (
+    CallInfo,
+    DecoratorInfo,
+    ImportInfo,
+    InheritanceInfo,
+    Relationship,
+    Symbol,
+    SymbolGraph,
+)
+
 
 @dataclass
 class CodingState:
@@ -57,6 +67,43 @@ class CodingState:
     dependency_graph: dict[str, list[str]] = field(
         default_factory=dict
     )
+
+    # ----------------------------------------------------------
+    # Symbol intelligence
+    # ----------------------------------------------------------
+
+    # Symbols discovered during AST analysis.
+    symbols: list[Symbol] = field(
+        default_factory=list
+    )
+
+    # Imports discovered during AST analysis.
+    symbol_imports: list[ImportInfo] = field(
+        default_factory=list
+    )
+
+    # Function and method calls discovered during AST analysis.
+    symbol_calls: list[CallInfo] = field(
+        default_factory=list
+    )
+
+    # Class inheritance relationships discovered during AST analysis.
+    symbol_inheritance: list[InheritanceInfo] = field(
+        default_factory=list
+    )
+
+    # Decorators discovered during AST analysis.
+    symbol_decorators: list[DecoratorInfo] = field(
+        default_factory=list
+    )
+
+    # Combined symbol relationships.
+    symbol_relationships: list[Relationship] = field(
+        default_factory=list
+    )
+
+    # Queryable symbol relationship graph.
+    symbol_graph: SymbolGraph | None = None
 
     # ----------------------------------------------------------
     # Current file

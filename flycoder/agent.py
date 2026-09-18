@@ -10,6 +10,10 @@ from flycoder.actions.registry import ActionResult
 from flycoder.state import CodingState
 from flycoder.tools.dependencies import build_dependency_graph
 from flycoder.tools.filesystem import Workspace
+from flycoder.tools.symbols import (
+    analyze_symbols,
+    build_symbol_report,
+)
 
 
 class FlyCoderAgent:
@@ -118,19 +122,12 @@ class FlyCoderAgent:
             )
 
     # ==============================================================
-    # FILE SELECTION
+    # TASK WORDS
     # ==============================================================
 
     @staticmethod
-    def select_relevant_files(
-        task: str,
-        files: list[str],
-        max_files: int = 5,
-    ) -> list[str]:
-        """Select the files most relevant to the user's task."""
-
-        if not files:
-            return []
+    def _extract_task_words(task: str) -> set[str]:
+        """Extract meaningful words from a task description."""
 
         task_words = {
             word.strip(
@@ -163,7 +160,86 @@ class FlyCoderAgent:
             "debug",
         }
 
-        task_words -= ignored_words
+        return task_words - ignored_words
+
+    # ==============================================================
+    # SYMBOL-AWARE FILE SCORING
+    # ==============================================================
+
+    @staticmethod
+    def _score_file_symbols(
+        task_words: set[str],
+        file_path: str,
+        workspace: Workspace,
+    ) -> int:
+        """Score a Python file according to its actual symbols."""
+
+        if not file_path.lower().endswith(".py"):
+            return 0
+
+        try:
+            content = workspace.read_file(
+                file_path
+            )
+        except (
+            FileNotFoundError,
+            UnicodeDecodeError,
+        ):
+            return 0
+
+        symbols = analyze_symbols(
+            content,
+            file_path=file_path,
+        )
+
+        if not symbols:
+            return 0
+
+        score = 0
+
+        symbol_names = {
+            symbol.name.lower()
+            for symbol in symbols
+        }
+
+        for word in task_words:
+            # Exact symbol match.
+            if word in symbol_names:
+                score += 12
+                continue
+
+            # Partial symbol match.
+            for symbol_name in symbol_names:
+                if (
+                    word in symbol_name
+                    or symbol_name in word
+                ):
+                    score += 4
+                    break
+
+        return score
+
+    # ==============================================================
+    # FILE SELECTION
+    # ==============================================================
+
+    @staticmethod
+    def select_relevant_files(
+        task: str,
+        files: list[str],
+        max_files: int = 5,
+        workspace: Workspace | None = None,
+    ) -> list[str]:
+        """Select the files most relevant to the user's task."""
+
+        if not files:
+            return []
+
+        task_words = (
+            FlyCoderAgent._extract_task_words(
+                task
+            )
+        )
 
         if not task_words:
             return files[:max_files]
@@ -264,6 +340,19 @@ class FlyCoderAgent:
                     f"/{normalized_path}/"
                 ):
                     score += 3
+
+            # ------------------------------------------------------
+            # Phase 3 symbol intelligence
+            # ------------------------------------------------------
+
+            if workspace is not None:
+                score += (
+                    FlyCoderAgent._score_file_symbols(
+                        task_words,
+                        file_path,
+                        workspace,
+                    )
+                )
 
             scored_files.append(
                 (score, file_path)
@@ -386,6 +475,7 @@ class FlyCoderAgent:
                     state.task,
                     state.files,
                     max_files=5,
+                    workspace=self.workspace,
                 )
             )
 
@@ -560,6 +650,40 @@ class FlyCoderAgent:
         print()
 
     # ==============================================================
+    # SYMBOL REPORT
+    # ==============================================================
+
+    def print_symbol_report(
+        self,
+        state: CodingState,
+    ) -> None:
+        """Print the discovered project symbol intelligence."""
+
+        if not (
+            state.symbols
+            or state.symbol_imports
+            or state.symbol_calls
+            or state.symbol_inheritance
+            or state.symbol_decorators
+            or state.symbol_relationships
+        ):
+            return
+
+        report = build_symbol_report(
+            symbols=state.symbols,
+            imports=state.symbol_imports,
+            calls=state.symbol_calls,
+            inheritance=state.symbol_inheritance,
+            decorators=state.symbol_decorators,
+            relationships=state.symbol_relationships,
+        )
+
+        print()
+        print(report)
+        print()
+
+
+    # ==============================================================
     # DEPENDENCY REPORT
     # ==============================================================
 
@@ -628,6 +752,10 @@ class FlyCoderAgent:
 
             if state.task_intent == "review":
                 self.print_review_report(
+                    state
+                )
+
+                self.print_symbol_report(
                     state
                 )
 
