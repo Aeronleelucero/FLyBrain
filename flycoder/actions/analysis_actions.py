@@ -2,7 +2,12 @@
 
 from flycoder.actions.registry import ActionResult
 from flycoder.state import CodingState
+from flycoder.tools.code_paths import analyze_code_paths
+from flycoder.tools.complexity import analyze_complexity
+from flycoder.tools.control_flow import analyze_control_flow
+from flycoder.tools.data_flow import analyze_data_flow
 from flycoder.tools.filesystem import Workspace
+from flycoder.tools.references import analyze_references
 from flycoder.tools.symbols import (
     SymbolGraph,
     analyze_calls,
@@ -57,10 +62,86 @@ def explain_error_action(
     )
 
 
-def _analyze_current_file_symbols(
+def _remove_file_analysis(
+    state: CodingState,
+    file_path: str,
+) -> None:
+    """Remove all existing intelligence for one file."""
+
+    state.symbols = [
+        item
+        for item in state.symbols
+        if item.file != file_path
+    ]
+
+    state.symbol_imports = [
+        item
+        for item in state.symbol_imports
+        if item.file != file_path
+    ]
+
+    state.symbol_calls = [
+        item
+        for item in state.symbol_calls
+        if item.file != file_path
+    ]
+
+    state.symbol_inheritance = [
+        item
+        for item in state.symbol_inheritance
+        if item.file != file_path
+    ]
+
+    state.symbol_decorators = [
+        item
+        for item in state.symbol_decorators
+        if item.file != file_path
+    ]
+
+    state.symbol_relationships = [
+        item
+        for item in state.symbol_relationships
+        if item.file != file_path
+    ]
+
+    state.control_flow = [
+        item
+        for item in state.control_flow
+        if item.file != file_path
+    ]
+
+    state.symbol_references = [
+        item
+        for item in state.symbol_references
+        if item.file != file_path
+    ]
+
+    state.data_flow = [
+        item
+        for item in state.data_flow
+        if item.file != file_path
+    ]
+
+    state.complexity_metrics = [
+        item
+        for item in state.complexity_metrics
+        if item.file != file_path
+    ]
+
+    state.code_paths = [
+        item
+        for item in state.code_paths
+        if item.file != file_path
+    ]
+
+
+def _analyze_current_file(
     state: CodingState,
 ) -> dict:
-    """Analyze the currently selected file with the Phase 3 symbol tools."""
+    """
+    Run all Phase 3 and Phase 4 intelligence analyzers on the
+    currently selected file.
+    """
 
     if not state.current_file:
         return {}
@@ -71,63 +152,81 @@ def _analyze_current_file_symbols(
     file_path = state.current_file
     content = state.current_file_content
 
+    # ----------------------------------------------------------
+    # Phase 3: Symbol intelligence
+    # ----------------------------------------------------------
+
     symbols = analyze_symbols(
         content,
         file_path=file_path,
     )
+
     imports = analyze_imports(
         content,
         file_path=file_path,
     )
+
     calls = analyze_calls(
         content,
         file_path=file_path,
     )
+
     inheritance = analyze_inheritance(
         content,
         file_path=file_path,
     )
+
     decorators = analyze_decorators(
         content,
         file_path=file_path,
     )
+
     relationships = analyze_relationships(
         content,
         file_path=file_path,
     )
 
-    # Replace symbol intelligence for this file rather than
-    # duplicating entries when the same file is analyzed again.
-    state.symbols = [
-        item
-        for item in state.symbols
-        if item.file != file_path
-    ]
-    state.symbol_imports = [
-        item
-        for item in state.symbol_imports
-        if item.file != file_path
-    ]
-    state.symbol_calls = [
-        item
-        for item in state.symbol_calls
-        if item.file != file_path
-    ]
-    state.symbol_inheritance = [
-        item
-        for item in state.symbol_inheritance
-        if item.file != file_path
-    ]
-    state.symbol_decorators = [
-        item
-        for item in state.symbol_decorators
-        if item.file != file_path
-    ]
-    state.symbol_relationships = [
-        item
-        for item in state.symbol_relationships
-        if item.file != file_path
-    ]
+    # ----------------------------------------------------------
+    # Phase 4: Code intelligence
+    # ----------------------------------------------------------
+
+    control_flow = analyze_control_flow(
+        content,
+        file_path=file_path,
+    )
+
+    references = analyze_references(
+        content,
+        file_path=file_path,
+    )
+
+    data_flow = analyze_data_flow(
+        content,
+        file_path=file_path,
+    )
+
+    complexity = analyze_complexity(
+        content,
+        file=file_path,
+    )
+
+    code_paths = analyze_code_paths(
+        content,
+        file=file_path,
+    )
+
+    # ----------------------------------------------------------
+    # Replace this file's previous analysis.
+    # ----------------------------------------------------------
+
+    _remove_file_analysis(
+        state,
+        file_path,
+    )
+
+    # ----------------------------------------------------------
+    # Store Phase 3 results.
+    # ----------------------------------------------------------
 
     state.symbols.extend(symbols)
     state.symbol_imports.extend(imports)
@@ -136,6 +235,18 @@ def _analyze_current_file_symbols(
     state.symbol_decorators.extend(decorators)
     state.symbol_relationships.extend(relationships)
 
+    # ----------------------------------------------------------
+    # Store Phase 4 results.
+    # ----------------------------------------------------------
+
+    state.control_flow.extend(control_flow)
+    state.symbol_references.extend(references)
+    state.data_flow.extend(data_flow)
+    state.complexity_metrics.extend(complexity)
+    state.code_paths.extend(code_paths)
+
+    # Rebuild the relationship graph from the complete
+    # project-level relationship collection.
     state.symbol_graph = SymbolGraph(
         state.symbol_relationships,
     )
@@ -147,6 +258,29 @@ def _analyze_current_file_symbols(
         "inheritance": inheritance,
         "decorators": decorators,
         "relationships": relationships,
+        "control_flow": control_flow,
+        "references": references,
+        "data_flow": data_flow,
+        "complexity": complexity,
+        "code_paths": code_paths,
+    }
+
+
+# Preserve the Phase 3 helper name for existing callers/tests.
+def _analyze_current_file_symbols(
+    state: CodingState,
+) -> dict:
+    """Compatibility wrapper for the Phase 3 symbol-analysis helper."""
+
+    data = _analyze_current_file(state)
+
+    return {
+        "symbols": data.get("symbols", []),
+        "imports": data.get("imports", []),
+        "calls": data.get("calls", []),
+        "inheritance": data.get("inheritance", []),
+        "decorators": data.get("decorators", []),
+        "relationships": data.get("relationships", []),
     }
 
 
@@ -154,7 +288,7 @@ def review_code_action(
     workspace: Workspace,
     state: CodingState,
 ) -> ActionResult:
-    """Perform static review and Phase 3 symbol analysis."""
+    """Perform static review and complete code intelligence analysis."""
 
     if not state.current_file:
         return ActionResult(
@@ -205,7 +339,9 @@ def review_code_action(
             "by the current rules."
         )
 
-    symbol_data = _analyze_current_file_symbols(state)
+    analysis_data = _analyze_current_file(
+        state,
+    )
 
     # Store the result for the final project-level report.
     state.review_findings.append(
@@ -221,24 +357,64 @@ def review_code_action(
         for index, finding in enumerate(findings, start=1)
     )
 
+    symbol_counts = {
+        "symbols": len(
+            analysis_data.get("symbols", [])
+        ),
+        "imports": len(
+            analysis_data.get("imports", [])
+        ),
+        "calls": len(
+            analysis_data.get("calls", [])
+        ),
+        "inheritance": len(
+            analysis_data.get("inheritance", [])
+        ),
+        "decorators": len(
+            analysis_data.get("decorators", [])
+        ),
+        "relationships": len(
+            analysis_data.get("relationships", [])
+        ),
+    }
+
+    code_intelligence_counts = {
+        "control_flow": len(
+            analysis_data.get("control_flow", [])
+        ),
+        "references": len(
+            analysis_data.get("references", [])
+        ),
+        "data_flow": len(
+            analysis_data.get("data_flow", [])
+        ),
+        "complexity": len(
+            analysis_data.get("complexity", [])
+        ),
+        "code_paths": len(
+            analysis_data.get("code_paths", [])
+        ),
+    }
+
     return ActionResult(
         action="review_code",
         success=True,
-        message="Code review and symbol analysis completed.",
+        message=(
+            "Code review and complete code intelligence "
+            "analysis completed."
+        ),
         data={
             "file": state.current_file,
             "lines": len(lines),
             "findings": findings,
             "review": review,
-            "symbol_counts": {
-                "symbols": len(symbol_data.get("symbols", [])),
-                "imports": len(symbol_data.get("imports", [])),
-                "calls": len(symbol_data.get("calls", [])),
-                "inheritance": len(symbol_data.get("inheritance", [])),
-                "decorators": len(symbol_data.get("decorators", [])),
-                "relationships": len(
-                    symbol_data.get("relationships", [])
-                ),
+            "symbol_counts": symbol_counts,
+            "code_intelligence_counts": (
+                code_intelligence_counts
+            ),
+            "analysis_counts": {
+                **symbol_counts,
+                **code_intelligence_counts,
             },
         },
     )
