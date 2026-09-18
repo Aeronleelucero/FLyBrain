@@ -103,6 +103,15 @@ def review_code_action(
             "by the current rules."
         )
 
+    # Store the result for the final project-level report.
+    state.review_findings.append(
+        {
+            "file": state.current_file,
+            "lines": len(lines),
+            "findings": findings,
+        }
+    )
+
     review = "\n".join(
         f"{index}. {finding}"
         for index, finding in enumerate(findings, start=1)
