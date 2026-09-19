@@ -1,10 +1,15 @@
 """Tests for the FLY-CODER Phase 5.7 planning pipeline."""
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 from flycoder.state import CodingState
 from flycoder.tools.code_plan import CodePlan
 from flycoder.tools.filesystem import Workspace
+from flycoder.tools.memory import (
+    Experience,
+    MemoryStore,
+)
 from flycoder.tools.planning_pipeline import (
     IntegratedPlanningResult,
     build_planning_report,
@@ -410,3 +415,156 @@ def test_pipeline_is_planning_only(tmp_path):
     }
 
     assert after == before
+
+def test_pipeline_exposes_learning_context(tmp_path):
+    workspace = make_workspace(tmp_path)
+    state = make_state()
+
+    result = create_integrated_plan(
+        workspace,
+        state,
+    )
+
+    assert result.learning is not None
+    assert result.learning.task == result.task
+    assert result.learning.memories == []
+
+
+def test_pipeline_uses_supplied_memory_store(tmp_path):
+    workspace = make_workspace(tmp_path)
+    state = make_state()
+
+    store = MemoryStore()
+
+    experience = Experience(
+        task="Add authentication validation",
+        action="Update authentication middleware",
+        outcome="Tests passed",
+        success=True,
+        verified=True,
+        recorded_at=datetime(
+            2026,
+            1,
+            1,
+            tzinfo=timezone.utc,
+        ),
+    )
+
+    store.record_experience(experience)
+
+    result = create_integrated_plan(
+        workspace,
+        state,
+        memory_store=store,
+    )
+
+    assert len(result.learning.memories) == 1
+    assert result.learning.memories[0].experience is experience
+
+
+def test_pipeline_learning_does_not_change_plan_structure(
+    tmp_path,
+):
+    workspace = make_workspace(tmp_path)
+    state = make_state()
+
+    without_memory = create_integrated_plan(
+        workspace,
+        state,
+    )
+
+    store = MemoryStore()
+
+    store.record_experience(
+        Experience(
+            task="Add authentication validation",
+            action="Update authentication middleware",
+            outcome="Tests passed",
+            success=True,
+            verified=True,
+        )
+    )
+
+    with_memory = create_integrated_plan(
+        workspace,
+        state,
+        memory_store=store,
+    )
+
+    assert [
+        item.description
+        for item in without_memory.task_plan.items
+    ] == [
+        item.description
+        for item in with_memory.task_plan.items
+    ]
+
+    assert [
+        step.id
+        for step in without_memory.plan.steps
+    ] == [
+        step.id
+        for step in with_memory.plan.steps
+    ]
+
+    assert (
+        without_memory.plan.validation_steps
+        == with_memory.plan.validation_steps
+    )
+
+
+def test_pipeline_learning_does_not_modify_memory_store(
+    tmp_path,
+):
+    workspace = make_workspace(tmp_path)
+    state = make_state()
+
+    store = MemoryStore()
+
+    experience = Experience(
+        task="Add authentication validation",
+        action="Update middleware",
+        outcome="Passed",
+        success=True,
+        verified=True,
+    )
+
+    store.record_experience(experience)
+    before = list(store.experiences)
+
+    create_integrated_plan(
+        workspace,
+        state,
+        memory_store=store,
+    )
+
+    assert store.experiences == before
+
+
+def test_planning_report_contains_learning_summary(tmp_path):
+    workspace = make_workspace(tmp_path)
+    state = make_state()
+
+    store = MemoryStore()
+
+    store.record_experience(
+        Experience(
+            task="Add authentication validation",
+            action="Update authentication middleware",
+            outcome="Passed",
+            success=True,
+            verified=True,
+        )
+    )
+
+    result = create_integrated_plan(
+        workspace,
+        state,
+        memory_store=store,
+    )
+
+    report = build_planning_report(result)
+
+    assert "Relevant memories: 1" in report
+    assert "Verified memories: 1" in report
+    assert "Previous failures: 0" in report

@@ -10,10 +10,16 @@ from flycoder.tools.code_plan import (
     PlanStep,
     create_plan,
 )
+from flycoder.tools.filesystem import Workspace
 from flycoder.tools.impact import (
     ImpactAnalysis,
     analyze_impact,
 )
+from flycoder.tools.learning import (
+    LearningContext,
+    retrieve_learning_context,
+)
+from flycoder.tools.memory import MemoryStore
 from flycoder.tools.ordering import (
     OrderingResult,
     order_plan_steps,
@@ -26,7 +32,6 @@ from flycoder.tools.planning import (
     TaskPlan,
     decompose_task,
 )
-from flycoder.tools.filesystem import Workspace
 from flycoder.tools.risk import (
     RiskAnalysis,
     analyze_risk,
@@ -35,9 +40,10 @@ from flycoder.tools.risk import (
 
 @dataclass
 class IntegratedPlanningResult:
-    """Complete result produced by the Phase 5 planning pipeline."""
+    """Complete result produced by the integrated planning pipeline."""
 
     task: str
+    learning: LearningContext
     task_plan: TaskPlan
     impact: ImpactAnalysis
     plan: CodePlan
@@ -145,16 +151,27 @@ def create_integrated_plan(
     workspace: Workspace,
     state: CodingState,
     task: str | None = None,
+    *,
+    memory_store: MemoryStore | None = None,
 ) -> IntegratedPlanningResult:
     """
-    Run the complete Phase 5 planning pipeline.
+    Run the complete planning pipeline.
 
     This function performs planning and analysis only. It never
     modifies source files.
+
+    When a MemoryStore is supplied, relevant previous experiences
+    are retrieved as advisory learning context. Memory does not
+    modify the generated plan automatically.
     """
 
     requested_task = _normalize_task(
         task if task is not None else state.task
+    )
+
+    learning = retrieve_learning_context(
+        memory_store or MemoryStore(),
+        requested_task,
     )
 
     task_plan = decompose_task(requested_task)
@@ -180,6 +197,7 @@ def create_integrated_plan(
 
     return IntegratedPlanningResult(
         task=requested_task,
+        learning=learning,
         task_plan=task_plan,
         impact=impact,
         plan=plan,
@@ -206,6 +224,9 @@ def build_planning_report(
         f"Ordered steps: {len(result.ordering.ordered_steps)}",
         f"Validation: {'VALID' if result.validation.valid else 'INVALID'}",
         f"Risk: {result.risk.level} ({result.risk.score})",
+        f"Relevant memories: {len(result.learning.memories)}",
+        f"Verified memories: {len(result.learning.verified_memories)}",
+        f"Previous failures: {len(result.learning.failed_memories)}",
         "",
         f"Plan executable: {'YES' if result.valid else 'NO'}",
         f"Plan safe: {'YES' if result.safe else 'NO'}",
