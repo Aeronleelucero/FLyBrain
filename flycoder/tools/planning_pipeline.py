@@ -1,10 +1,14 @@
-"""Integrated planning pipeline for FLY-CODER Phase 9.1."""
+"""Integrated planning pipeline for FLY-CODER Phase 9.2."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 from flycoder.state import CodingState
+from flycoder.tools.action_selection import (
+    ActionDecision,
+    select_action,
+)
 from flycoder.tools.code_plan import (
     CodePlan,
     PlanStep,
@@ -49,6 +53,7 @@ class IntegratedPlanningResult:
     task: str
     learning: LearningContext
     strategy: StrategyDecision
+    action: ActionDecision
     task_plan: TaskPlan
     impact: ImpactAnalysis
     plan: CodePlan
@@ -163,12 +168,11 @@ def create_integrated_plan(
     Run the complete planning pipeline.
 
     This function performs planning and analysis only. It never
-    modifies source files.
+    modifies source files or executes registered actions.
 
-    When a MemoryStore is supplied, relevant previous experiences
-    are retrieved as advisory learning context. Strategy selection
-    is also advisory and does not execute tools or modify the plan
-    automatically.
+    Learning, strategy selection, and action selection are advisory.
+    They do not automatically execute tools or modify the generated
+    plan.
     """
 
     requested_task = _normalize_task(
@@ -182,6 +186,12 @@ def create_integrated_plan(
 
     strategy = select_strategy(
         requested_task,
+        learning,
+    )
+
+    action = select_action(
+        requested_task,
+        strategy,
         learning,
     )
 
@@ -210,6 +220,7 @@ def create_integrated_plan(
         task=requested_task,
         learning=learning,
         strategy=strategy,
+        action=action,
         task_plan=task_plan,
         impact=impact,
         plan=plan,
@@ -247,9 +258,27 @@ def build_planning_report(
         f"  Confidence: {result.strategy.confidence:.2f}",
         f"  Reason: {result.strategy.reason}",
         "",
+        "Action:",
+        f"  Selected: {result.action.action}",
+        f"  Confidence: {result.action.confidence:.2f}",
+        f"  Reason: {result.action.reason}",
+        "",
         f"Plan executable: {'YES' if result.valid else 'NO'}",
         f"Plan safe: {'YES' if result.safe else 'NO'}",
     ]
+
+    if result.action.risks:
+        lines.extend(
+            [
+                "",
+                "Action risks:",
+            ]
+        )
+
+        for risk in result.action.risks:
+            lines.append(
+                f"  - {risk}"
+            )
 
     if result.strategy.supporting_memories:
         lines.extend(
