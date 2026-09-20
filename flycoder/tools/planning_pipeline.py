@@ -1,4 +1,4 @@
-"""Integrated planning pipeline for FLY-CODER Phase 5.7."""
+"""Integrated planning pipeline for FLY-CODER Phase 9.1."""
 
 from __future__ import annotations
 
@@ -36,6 +36,10 @@ from flycoder.tools.risk import (
     RiskAnalysis,
     analyze_risk,
 )
+from flycoder.tools.strategy import (
+    StrategyDecision,
+    select_strategy,
+)
 
 
 @dataclass
@@ -44,6 +48,7 @@ class IntegratedPlanningResult:
 
     task: str
     learning: LearningContext
+    strategy: StrategyDecision
     task_plan: TaskPlan
     impact: ImpactAnalysis
     plan: CodePlan
@@ -161,8 +166,9 @@ def create_integrated_plan(
     modifies source files.
 
     When a MemoryStore is supplied, relevant previous experiences
-    are retrieved as advisory learning context. Memory does not
-    modify the generated plan automatically.
+    are retrieved as advisory learning context. Strategy selection
+    is also advisory and does not execute tools or modify the plan
+    automatically.
     """
 
     requested_task = _normalize_task(
@@ -172,6 +178,11 @@ def create_integrated_plan(
     learning = retrieve_learning_context(
         memory_store or MemoryStore(),
         requested_task,
+    )
+
+    strategy = select_strategy(
+        requested_task,
+        learning,
     )
 
     task_plan = decompose_task(requested_task)
@@ -198,6 +209,7 @@ def create_integrated_plan(
     return IntegratedPlanningResult(
         task=requested_task,
         learning=learning,
+        strategy=strategy,
         task_plan=task_plan,
         impact=impact,
         plan=plan,
@@ -224,13 +236,49 @@ def build_planning_report(
         f"Ordered steps: {len(result.ordering.ordered_steps)}",
         f"Validation: {'VALID' if result.validation.valid else 'INVALID'}",
         f"Risk: {result.risk.level} ({result.risk.score})",
-        f"Relevant memories: {len(result.learning.memories)}",
-        f"Verified memories: {len(result.learning.verified_memories)}",
-        f"Previous failures: {len(result.learning.failed_memories)}",
+        "",
+        "Learning:",
+        f"  Relevant memories: {len(result.learning.memories)}",
+        f"  Verified memories: {len(result.learning.verified_memories)}",
+        f"  Previous failures: {len(result.learning.failed_memories)}",
+        "",
+        "Strategy:",
+        f"  Selected: {result.strategy.strategy}",
+        f"  Confidence: {result.strategy.confidence:.2f}",
+        f"  Reason: {result.strategy.reason}",
         "",
         f"Plan executable: {'YES' if result.valid else 'NO'}",
         f"Plan safe: {'YES' if result.safe else 'NO'}",
     ]
+
+    if result.strategy.supporting_memories:
+        lines.extend(
+            [
+                "",
+                "Supporting strategy memories:",
+            ]
+        )
+
+        for memory in result.strategy.supporting_memories:
+            experience = memory.experience
+
+            lines.append(
+                f"  - {experience.action}"
+                f" (verified={experience.verified})"
+            )
+
+    if result.strategy.risks:
+        lines.extend(
+            [
+                "",
+                "Strategy risks:",
+            ]
+        )
+
+        for risk in result.strategy.risks:
+            lines.append(
+                f"  - {risk}"
+            )
 
     if result.ordering.missing_dependencies:
         lines.extend(
