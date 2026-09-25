@@ -131,6 +131,19 @@ class CodingState:
     error_inspected: bool = False
 
     # ----------------------------------------------------------
+    # Adaptive execution
+    # ----------------------------------------------------------
+
+    # Most recently executed action.
+    last_action: str | None = None
+
+    # Whether the most recently executed action reported success.
+    last_action_success: bool | None = None
+
+    # Human-readable result of the most recently executed action.
+    last_action_message: str | None = None
+
+    # ----------------------------------------------------------
     # Repair workflow
     # ----------------------------------------------------------
 

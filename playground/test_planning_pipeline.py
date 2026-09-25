@@ -1,4 +1,4 @@
-"""Tests for the FLY-CODER Phase 5.7 planning pipeline."""
+"""Tests for the FLY-CODER Phase 9.1 planning pipeline."""
 
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,6 +15,7 @@ from flycoder.tools.planning_pipeline import (
     build_planning_report,
     create_integrated_plan,
 )
+from flycoder.tools.strategy import StrategyDecision
 
 
 def make_workspace(tmp_path: Path) -> Workspace:
@@ -74,6 +75,8 @@ def test_create_integrated_plan_returns_complete_result(tmp_path):
 
     assert isinstance(result, IntegratedPlanningResult)
     assert result.task == "Add authentication validation"
+    assert result.learning is not None
+    assert result.strategy is not None
     assert result.task_plan is not None
     assert result.impact is not None
     assert result.plan is not None
@@ -386,6 +389,9 @@ def test_pipeline_is_deterministic(tmp_path):
     assert first.risk.level == second.risk.level
     assert first.risk.score == second.risk.score
 
+    assert first.strategy.strategy == second.strategy.strategy
+    assert first.strategy.confidence == second.strategy.confidence
+
 
 def test_pipeline_is_planning_only(tmp_path):
     workspace = make_workspace(tmp_path)
@@ -415,6 +421,7 @@ def test_pipeline_is_planning_only(tmp_path):
     }
 
     assert after == before
+
 
 def test_pipeline_exposes_learning_context(tmp_path):
     workspace = make_workspace(tmp_path)
@@ -539,6 +546,7 @@ def test_pipeline_learning_does_not_modify_memory_store(
     )
 
     assert store.experiences == before
+    assert store.experiences[0] is experience
 
 
 def test_planning_report_contains_learning_summary(tmp_path):
@@ -568,3 +576,134 @@ def test_planning_report_contains_learning_summary(tmp_path):
     assert "Relevant memories: 1" in report
     assert "Verified memories: 1" in report
     assert "Previous failures: 0" in report
+
+
+def test_pipeline_exposes_strategy_decision(tmp_path):
+    workspace = make_workspace(tmp_path)
+    state = make_state()
+
+    result = create_integrated_plan(
+        workspace,
+        state,
+    )
+
+    assert isinstance(result.strategy, StrategyDecision)
+    assert result.strategy.strategy == "create_new"
+    assert 0.0 <= result.strategy.confidence <= 1.0
+
+
+def test_pipeline_strategy_uses_learning_context(tmp_path):
+    workspace = make_workspace(tmp_path)
+    state = make_state()
+
+    store = MemoryStore()
+
+    store.record_experience(
+        Experience(
+            task="Add authentication validation",
+            action="Implement authentication validation",
+            outcome="Tests passed",
+            success=True,
+            verified=True,
+        )
+    )
+
+    result = create_integrated_plan(
+        workspace,
+        state,
+        memory_store=store,
+    )
+
+    assert result.strategy.strategy == "create_new"
+    assert len(result.strategy.supporting_memories) == 1
+    assert result.strategy.supporting_memories[0].experience is (
+        store.experiences[0]
+    )
+
+
+def test_pipeline_strategy_does_not_change_plan_structure(tmp_path):
+    workspace = make_workspace(tmp_path)
+    state = make_state()
+
+    without_memory = create_integrated_plan(
+        workspace,
+        state,
+    )
+
+    store = MemoryStore()
+
+    store.record_experience(
+        Experience(
+            task="Add authentication validation",
+            action="Implement authentication validation",
+            outcome="Tests passed",
+            success=True,
+            verified=True,
+        )
+    )
+
+    with_memory = create_integrated_plan(
+        workspace,
+        state,
+        memory_store=store,
+    )
+
+    assert [
+        step.id for step in with_memory.plan.steps
+    ] == [
+        step.id for step in without_memory.plan.steps
+    ]
+
+    assert [
+        step.description for step in with_memory.plan.steps
+    ] == [
+        step.description for step in without_memory.plan.steps
+    ]
+
+    assert with_memory.plan.validation_steps == (
+        without_memory.plan.validation_steps
+    )
+
+
+def test_pipeline_strategy_does_not_modify_memory_store(tmp_path):
+    workspace = make_workspace(tmp_path)
+    state = make_state()
+
+    store = MemoryStore()
+
+    experience = Experience(
+        task="Add authentication validation",
+        action="Implement authentication validation",
+        outcome="Tests passed",
+        success=True,
+        verified=True,
+    )
+
+    store.record_experience(experience)
+
+    before = list(store.experiences)
+
+    create_integrated_plan(
+        workspace,
+        state,
+        memory_store=store,
+    )
+
+    assert store.experiences == before
+    assert store.experiences[0] is experience
+
+
+def test_planning_report_contains_strategy_summary(tmp_path):
+    workspace = make_workspace(tmp_path)
+    state = make_state()
+
+    result = create_integrated_plan(
+        workspace,
+        state,
+    )
+
+    report = build_planning_report(result)
+
+    assert "Strategy:" in report
+    assert "Selected: create_new" in report
+    assert "Confidence:" in report

@@ -9,7 +9,14 @@ from flycoder.actions import create_action_registry
 from flycoder.actions.registry import ActionResult
 from flycoder.state import CodingState
 from flycoder.tools.dependencies import build_dependency_graph
+from flycoder.tools.execution import observe_action
 from flycoder.tools.filesystem import Workspace
+from flycoder.tools.guardrails import check_guardrails
+from flycoder.tools.learning_feedback import (
+    build_learning_outcome,
+    record_learning_outcome,
+)
+from flycoder.tools.memory import MemoryStore
 from flycoder.tools.symbols import (
     analyze_symbols,
     build_symbol_report,
@@ -27,9 +34,27 @@ class FlyCoderAgent:
 
     MAX_REVIEW_FILES = 8
 
-    def __init__(self, workspace: str | Path):
+    def __init__(
+        self,
+        workspace: str | Path,
+        memory_store: MemoryStore | None = None,
+    ):
+        """Initialize the agent and its execution memory."""
+
         self.workspace = Workspace(workspace)
         self.actions = create_action_registry()
+
+        # Phase 9.7:
+        # Keep one memory store for the lifetime of this
+        # agent instance so execution feedback can accumulate.
+        #
+        # An external store may be supplied when callers want
+        # memory to survive across multiple agent instances.
+        self.memory_store = (
+            memory_store
+            if memory_store is not None
+            else MemoryStore()
+        )
 
     # ==============================================================
     # TASK CLASSIFICATION
@@ -120,6 +145,39 @@ class FlyCoderAgent:
             state.task_intent = self.classify_task(
                 state.task
             )
+
+    # ==============================================================
+    # LEARNING FILE EXTRACTION
+    # ==============================================================
+
+    def _learning_files(
+        self,
+        result: ActionResult,
+        state: CodingState,
+    ) -> list[str]:
+        """Extract files relevant to the recorded learning outcome.
+
+        File information is taken from the action result when the
+        action explicitly provides a file list. Otherwise the current
+        state file is used when available.
+
+        This function is observational only and does not mutate state.
+        """
+
+        if isinstance(result.data, dict):
+            files = result.data.get("files")
+
+            if isinstance(files, list):
+                return [
+                    file_path
+                    for file_path in files
+                    if isinstance(file_path, str)
+                ]
+
+        if state.current_file:
+            return [state.current_file]
+
+        return []
 
     # ==============================================================
     # TASK WORDS
@@ -682,7 +740,6 @@ class FlyCoderAgent:
         print(report)
         print()
 
-
     # ==============================================================
     # DEPENDENCY REPORT
     # ==============================================================
@@ -737,6 +794,10 @@ class FlyCoderAgent:
 
         # ----------------------------------------------------------
         # Finish
+        #
+        # "finish" is a control-flow state rather than a coding
+        # action, so it is intentionally not recorded as a memory
+        # experience.
         # ----------------------------------------------------------
 
         if action == "finish":
@@ -827,14 +888,179 @@ class FlyCoderAgent:
             )
 
         # ----------------------------------------------------------
-        # Execute action
+        # Phase 9.6 — PRE-EXECUTION GUARDRAIL
         # ----------------------------------------------------------
 
-        result = self.actions.execute(
-            action,
-            workspace=self.workspace,
-            state=state,
+        preflight = ActionResult(
+            action=action,
+            success=True,
+            message=(
+                "Pre-execution guardrail check."
+            ),
         )
+
+        guardrail_decision = check_guardrails(
+            preflight,
+            state,
+        )
+
+        # ----------------------------------------------------------
+        # Block unsafe actions BEFORE execution.
+        #
+        # This is the Phase 9.6 execution boundary.
+        #
+        # Guardrails do not:
+        #   - execute actions
+        #   - select actions
+        #   - grant approval
+        #   - use confidence as permission
+        #   - use strategy as permission
+        #   - use recovery as permission
+        # ----------------------------------------------------------
+
+        if not guardrail_decision.allowed:
+
+            result = ActionResult(
+                action=action,
+                success=False,
+                message=guardrail_decision.reason,
+                data={
+                    "guardrail": {
+                        "allowed": (
+                            guardrail_decision.allowed
+                        ),
+                        "reason": (
+                            guardrail_decision.reason
+                        ),
+                        "violations": (
+                            guardrail_decision.violations
+                        ),
+                        "warnings": (
+                            guardrail_decision.warnings
+                        ),
+                        "requires_human_approval": (
+                            guardrail_decision
+                            .requires_human_approval
+                        ),
+                    },
+                },
+            )
+
+        else:
+
+            # ------------------------------------------------------
+            # Actual action execution
+            # ------------------------------------------------------
+
+            result = self.actions.execute(
+                action,
+                workspace=self.workspace,
+                state=state,
+            )
+
+            # ------------------------------------------------------
+            # Attach guardrail decision to execution result.
+            # ------------------------------------------------------
+
+            if result.data is None:
+                result.data = {}
+
+            if isinstance(result.data, dict):
+
+                result.data["guardrail"] = {
+                    "allowed": (
+                        guardrail_decision.allowed
+                    ),
+                    "reason": (
+                        guardrail_decision.reason
+                    ),
+                    "violations": (
+                        guardrail_decision.violations
+                    ),
+                    "warnings": (
+                        guardrail_decision.warnings
+                    ),
+                    "requires_human_approval": (
+                        guardrail_decision
+                        .requires_human_approval
+                    ),
+                }
+
+            else:
+
+                result.data = {
+                    "result": result.data,
+                    "guardrail": {
+                        "allowed": (
+                            guardrail_decision.allowed
+                        ),
+                        "reason": (
+                            guardrail_decision.reason
+                        ),
+                        "violations": (
+                            guardrail_decision.violations
+                        ),
+                        "warnings": (
+                            guardrail_decision.warnings
+                        ),
+                        "requires_human_approval": (
+                            guardrail_decision
+                            .requires_human_approval
+                        ),
+                    },
+                }
+
+        # ----------------------------------------------------------
+        # Record execution result
+        # ----------------------------------------------------------
+
+        state.last_action = result.action
+        state.last_action_success = result.success
+        state.last_action_message = result.message
+
+        # ----------------------------------------------------------
+        # Observe the result without executing another action.
+        #
+        # IMPORTANT:
+        # observe_action() remains advisory.
+        # It cannot bypass guardrails.
+        # ----------------------------------------------------------
+
+        observation = observe_action(
+            result,
+            state,
+        )
+
+        # ----------------------------------------------------------
+        # Display guardrail block
+        # ----------------------------------------------------------
+
+        if not guardrail_decision.allowed:
+
+            print()
+            print("Execution blocked by guardrails:")
+
+            for violation in (
+                guardrail_decision.violations
+            ):
+                print(
+                    f"  ❌ {violation}"
+                )
+
+            for warning in (
+                guardrail_decision.warnings
+            ):
+                print(
+                    f"  ⚠ {warning}"
+                )
+
+            if (
+                guardrail_decision
+                .requires_human_approval
+            ):
+                print(
+                    "  👤 Human approval/input is required."
+                )
 
         # ----------------------------------------------------------
         # Display analysis output
@@ -843,6 +1069,7 @@ class FlyCoderAgent:
         if (
             action == "explain_error"
             and result.data
+            and isinstance(result.data, dict)
         ):
             print()
             print("Error explanation:")
@@ -856,6 +1083,7 @@ class FlyCoderAgent:
         elif (
             action == "review_code"
             and result.data
+            and isinstance(result.data, dict)
         ):
             print()
             print("Code review:")
@@ -869,6 +1097,7 @@ class FlyCoderAgent:
         elif (
             action == "improve_code"
             and result.data
+            and isinstance(result.data, dict)
         ):
             print()
             print("Improvement proposal:")
@@ -895,7 +1124,10 @@ class FlyCoderAgent:
         # Update analysis state
         # ----------------------------------------------------------
 
-        if action in self.ANALYSIS_ACTIONS:
+        if (
+            result.success
+            and action in self.ANALYSIS_ACTIONS
+        ):
 
             if (
                 state.current_file
@@ -926,6 +1158,87 @@ class FlyCoderAgent:
             elif action == "improve_code":
 
                 state.finished = True
+
+        # ----------------------------------------------------------
+        # Attach adaptive execution observation
+        # ----------------------------------------------------------
+
+        if result.data is None:
+            result.data = {}
+
+        if isinstance(result.data, dict):
+            result.data["execution_observation"] = {
+                "action": observation.action,
+                "success": observation.success,
+                "message": observation.message,
+                "next_action": observation.next_action,
+                "reason": observation.reason,
+                "risks": observation.risks,
+                "requires_human_input": (
+                    observation.requires_human_input
+                ),
+            }
+
+        # ----------------------------------------------------------
+        # Phase 9.7 — LEARNING FEEDBACK
+        #
+        # Learning is observational only.
+        #
+        # It does NOT:
+        #   - execute another action
+        #   - modify workspace files
+        #   - grant approval
+        #   - bypass guardrails
+        #   - mutate CodingState
+        # ----------------------------------------------------------
+
+        learning_outcome = build_learning_outcome(
+            result,
+            state,
+        )
+
+        experience = record_learning_outcome(
+            self.memory_store,
+            learning_outcome,
+            files=self._learning_files(
+                result,
+                state,
+            ),
+        )
+
+        if isinstance(result.data, dict):
+            result.data["learning_feedback"] = {
+                "task": learning_outcome.task,
+                "task_intent": (
+                    learning_outcome.task_intent
+                ),
+                "action": learning_outcome.action,
+                "success": learning_outcome.success,
+                "strategy": learning_outcome.strategy,
+                "tests_run": (
+                    learning_outcome.tests_run
+                ),
+                "tests_passed": (
+                    learning_outcome.tests_passed
+                ),
+                "guardrail_blocked": (
+                    learning_outcome.guardrail_blocked
+                ),
+                "human_input_required": (
+                    learning_outcome.human_input_required
+                ),
+                "confidence_score": (
+                    learning_outcome.confidence_score
+                ),
+                "recovery_action": (
+                    learning_outcome.recovery_action
+                ),
+                "experience_recorded": True,
+                "memory_size": len(
+                    self.memory_store.experiences
+                ),
+                "verified": experience.verified,
+            }
 
         return result
 
@@ -1032,6 +1345,15 @@ def cli() -> None:
             print(
                 f"  data={result.data}"
             )
+
+        # ----------------------------------------------------------
+        # Explicit CLI approval boundary
+        #
+        # This is intentionally NOT passed through automatic
+        # action selection or confidence.
+        #
+        # --approve is an explicit user-provided CLI authorization.
+        # ----------------------------------------------------------
 
         if (
             args.approve
