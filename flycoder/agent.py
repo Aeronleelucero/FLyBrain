@@ -9,6 +9,7 @@ from flycoder.actions import create_action_registry
 from flycoder.actions.registry import ActionResult
 from flycoder.state import CodingState
 from flycoder.tools.dependencies import build_dependency_graph
+from flycoder.tools.execution import observe_action
 from flycoder.tools.filesystem import Workspace
 from flycoder.tools.symbols import (
     analyze_symbols,
@@ -682,7 +683,6 @@ class FlyCoderAgent:
         print(report)
         print()
 
-
     # ==============================================================
     # DEPENDENCY REPORT
     # ==============================================================
@@ -837,6 +837,20 @@ class FlyCoderAgent:
         )
 
         # ----------------------------------------------------------
+        # Record execution result
+        # ----------------------------------------------------------
+
+        state.last_action = result.action
+        state.last_action_success = result.success
+        state.last_action_message = result.message
+
+        # Observe the result without executing another action.
+        observation = observe_action(
+            result,
+            state,
+        )
+
+        # ----------------------------------------------------------
         # Display analysis output
         # ----------------------------------------------------------
 
@@ -926,6 +940,26 @@ class FlyCoderAgent:
             elif action == "improve_code":
 
                 state.finished = True
+
+        # ----------------------------------------------------------
+        # Attach adaptive execution observation
+        # ----------------------------------------------------------
+
+        if result.data is None:
+            result.data = {}
+
+        if isinstance(result.data, dict):
+            result.data["execution_observation"] = {
+                "action": observation.action,
+                "success": observation.success,
+                "message": observation.message,
+                "next_action": observation.next_action,
+                "reason": observation.reason,
+                "risks": observation.risks,
+                "requires_human_input": (
+                    observation.requires_human_input
+                ),
+            }
 
         return result
 
