@@ -21,7 +21,13 @@ from flycoder.tools.impact import (
 )
 from flycoder.tools.learning import (
     LearningContext,
+    build_learning_guidance,
     retrieve_learning_context,
+)
+from flycoder.tools.learning_validation import (
+    LearningValidationResult,
+    build_validation_guidance,
+    validate_learning_context,
 )
 from flycoder.tools.memory import MemoryStore
 from flycoder.tools.ordering import (
@@ -52,6 +58,7 @@ class IntegratedPlanningResult:
 
     task: str
     learning: LearningContext
+    learning_validation: LearningValidationResult
     strategy: StrategyDecision
     action: ActionDecision
     task_plan: TaskPlan
@@ -64,17 +71,25 @@ class IntegratedPlanningResult:
     @property
     def valid(self) -> bool:
         """Return whether the integrated plan is valid."""
-        return self.validation.valid and self.ordering.valid
+        return (
+            self.validation.valid
+            and self.ordering.valid
+        )
 
     @property
     def safe(self) -> bool:
         """Return whether the plan is valid and not high risk."""
-        return self.valid and self.risk.level != "HIGH"
+        return (
+            self.valid
+            and self.risk.level != "HIGH"
+        )
 
 
 def _normalize_task(task: str) -> str:
     """Normalize task text consistently across the pipeline."""
-    return " ".join(task.strip().split())
+    return " ".join(
+        task.strip().split()
+    )
 
 
 def _build_plan_steps(
@@ -98,19 +113,28 @@ def _build_plan_steps(
 
     steps: list[PlanStep] = []
 
-    for index, item in enumerate(task_plan.items, start=1):
+    for index, item in enumerate(
+        task_plan.items,
+        start=1,
+    ):
         dependencies: list[str] = []
 
         if steps:
-            dependencies.append(steps[-1].id)
+            dependencies.append(
+                steps[-1].id
+            )
 
         steps.append(
             PlanStep(
                 id=f"step-{index}",
                 description=item.description,
                 category=item.category,
-                affected_files=list(affected_files),
-                affected_symbols=list(affected_symbols),
+                affected_files=list(
+                    affected_files
+                ),
+                affected_symbols=list(
+                    affected_symbols
+                ),
                 dependencies=dependencies,
                 rationale=(
                     "Generated from task decomposition and "
@@ -131,17 +155,27 @@ def _build_code_plan(
 
     plan = create_plan(
         task=task,
-        objective=f"Complete the requested task: {task}",
+        objective=(
+            f"Complete the requested task: {task}"
+        ),
     )
 
-    for step in _build_plan_steps(task_plan, impact):
+    for step in _build_plan_steps(
+        task_plan,
+        impact,
+    ):
         plan.add_step(step)
 
     for item in impact.items:
         if item.kind == "file":
-            plan.add_impacted_file(item.path)
+            plan.add_impacted_file(
+                item.path
+            )
 
-        elif item.kind == "symbol" and item.name:
+        elif (
+            item.kind == "symbol"
+            and item.name
+        ):
             plan.add_impacted_symbol(
                 f"{item.path}:{item.name}"
             )
@@ -171,23 +205,69 @@ def create_integrated_plan(
     modifies source files or executes registered actions.
 
     Learning, strategy selection, and action selection are advisory.
-    They do not automatically execute tools or modify the generated
-    plan.
+    They do not automatically execute tools, modify files, grant
+    approval, or bypass execution guardrails.
     """
 
     requested_task = _normalize_task(
-        task if task is not None else state.task
+        task
+        if task is not None
+        else state.task
+    )
+
+    # --------------------------------------------------------------
+    # Phase 9.7.4 — Learning-aware planning
+    #
+    # Use the caller's MemoryStore when one is supplied.
+    #
+    # IMPORTANT:
+    # Do not use:
+    #
+    #     memory_store or MemoryStore()
+    #
+    # because an empty MemoryStore can evaluate as falsey.
+    # That would silently replace the caller's store.
+    # --------------------------------------------------------------
+
+    active_memory_store = (
+        memory_store
+        if memory_store is not None
+        else MemoryStore()
     )
 
     learning = retrieve_learning_context(
-        memory_store or MemoryStore(),
+        active_memory_store,
         requested_task,
     )
+
+    # --------------------------------------------------------------
+    # Phase 9.7.5 — Learning validation
+#
+    # Validate retrieved learning before it influences planning.
+    # Validation is advisory and does not mutate the memory store.
+    # --------------------------------------------------------------
+
+    learning_validation = validate_learning_context(
+        learning
+    )
+
+    # --------------------------------------------------------------
+    # Strategy selection receives the retrieved learning context.
+    #
+    # Learning is advisory evidence only.
+    # --------------------------------------------------------------
 
     strategy = select_strategy(
         requested_task,
         learning,
     )
+
+    # --------------------------------------------------------------
+    # Action selection receives the same learning context.
+    #
+    # Learning can inform the recommendation but cannot authorize
+    # execution.
+    # --------------------------------------------------------------
 
     action = select_action(
         requested_task,
@@ -195,7 +275,13 @@ def create_integrated_plan(
         learning,
     )
 
-    task_plan = decompose_task(requested_task)
+    # --------------------------------------------------------------
+    # Continue with deterministic task planning.
+    # --------------------------------------------------------------
+
+    task_plan = decompose_task(
+        requested_task
+    )
 
     impact = analyze_impact(
         requested_task,
@@ -210,15 +296,22 @@ def create_integrated_plan(
         impact,
     )
 
-    ordering = order_plan_steps(plan)
+    ordering = order_plan_steps(
+        plan
+    )
 
-    validation = validate_code_plan(plan)
+    validation = validate_code_plan(
+        plan
+    )
 
-    risk = analyze_risk(plan)
+    risk = analyze_risk(
+        plan
+    )
 
     return IntegratedPlanningResult(
         task=requested_task,
         learning=learning,
+        learning_validation=learning_validation,
         strategy=strategy,
         action=action,
         task_plan=task_plan,
@@ -244,28 +337,164 @@ def build_planning_report(
         f"Task items: {len(result.task_plan.items)}",
         f"Impact items: {len(result.impact.items)}",
         f"Plan steps: {len(result.plan.steps)}",
-        f"Ordered steps: {len(result.ordering.ordered_steps)}",
-        f"Validation: {'VALID' if result.validation.valid else 'INVALID'}",
-        f"Risk: {result.risk.level} ({result.risk.score})",
+        (
+            "Ordered steps: "
+            f"{len(result.ordering.ordered_steps)}"
+        ),
+        (
+            "Validation: "
+            f"{'VALID' if result.validation.valid else 'INVALID'}"
+        ),
+        (
+            "Risk: "
+            f"{result.risk.level} "
+            f"({result.risk.score})"
+        ),
         "",
         "Learning:",
-        f"  Relevant memories: {len(result.learning.memories)}",
-        f"  Verified memories: {len(result.learning.verified_memories)}",
-        f"  Previous failures: {len(result.learning.failed_memories)}",
-        "",
-        "Strategy:",
-        f"  Selected: {result.strategy.strategy}",
-        f"  Confidence: {result.strategy.confidence:.2f}",
-        f"  Reason: {result.strategy.reason}",
-        "",
-        "Action:",
-        f"  Selected: {result.action.action}",
-        f"  Confidence: {result.action.confidence:.2f}",
-        f"  Reason: {result.action.reason}",
-        "",
-        f"Plan executable: {'YES' if result.valid else 'NO'}",
-        f"Plan safe: {'YES' if result.safe else 'NO'}",
+        (
+            "  Relevant memories: "
+            f"{len(result.learning.memories)}"
+        ),
+        (
+            "  Verified memories: "
+            f"{len(result.learning.verified_memories)}"
+        ),
+        (
+            "  Previous failures: "
+            f"{len(result.learning.failed_memories)}"
+        ),
+        (
+            "  Trusted memories: "
+            f"{len(result.learning_validation.trusted_memories)}"
+        ),
+        (
+            "  Rejected memories: "
+            f"{len(result.learning_validation.rejected_memories)}"
+        ),
     ]
+
+    # --------------------------------------------------------------
+    # Learning guidance
+    # --------------------------------------------------------------
+
+    learning_guidance = build_learning_guidance(
+        result.learning
+    )
+
+    if learning_guidance:
+        lines.extend(
+            [
+                "",
+                "Learning guidance:",
+            ]
+        )
+
+        for guidance in learning_guidance:
+            lines.append(
+                f"  - {guidance}"
+            )
+    else:
+        lines.extend(
+            [
+                "",
+                "Learning guidance:",
+                "  - No relevant previous experience found.",
+            ]
+        )
+
+    # --------------------------------------------------------------
+    # Learning validation guidance
+    # --------------------------------------------------------------
+
+    validation_guidance = build_validation_guidance(
+        result.learning_validation
+    )
+
+    if validation_guidance:
+        lines.extend(
+            [
+                "",
+                "Learning validation:",
+            ]
+        )
+
+        for guidance in validation_guidance:
+            lines.append(
+                f"  - {guidance}"
+            )
+    else:
+        lines.extend(
+            [
+                "",
+                "Learning validation:",
+                "  - No validation warnings or trust guidance.",
+            ]
+        )
+
+    # --------------------------------------------------------------
+    # Strategy
+    # --------------------------------------------------------------
+
+    lines.extend(
+        [
+            "",
+            "Strategy:",
+            (
+                "  Selected: "
+                f"{result.strategy.strategy}"
+            ),
+            (
+                "  Confidence: "
+                f"{result.strategy.confidence:.2f}"
+            ),
+            (
+                "  Reason: "
+                f"{result.strategy.reason}"
+            ),
+        ]
+    )
+
+    # --------------------------------------------------------------
+    # Action
+    # --------------------------------------------------------------
+
+    lines.extend(
+        [
+            "",
+            "Action:",
+            (
+                "  Selected: "
+                f"{result.action.action}"
+            ),
+            (
+                "  Confidence: "
+                f"{result.action.confidence:.2f}"
+            ),
+            (
+                "  Reason: "
+                f"{result.action.reason}"
+            ),
+        ]
+    )
+
+    lines.extend(
+        [
+            "",
+            (
+                "Plan executable: "
+                f"{'YES' if result.valid else 'NO'}"
+            ),
+            (
+                "Plan safe: "
+                f"{'YES' if result.safe else 'NO'}"
+            ),
+        ]
+    )
+
+    # --------------------------------------------------------------
+    # Action risks
+    # --------------------------------------------------------------
 
     if result.action.risks:
         lines.extend(
@@ -280,6 +509,29 @@ def build_planning_report(
                 f"  - {risk}"
             )
 
+    # --------------------------------------------------------------
+    # Action learning guidance
+    # --------------------------------------------------------------
+
+    if result.action.learning_guidance:
+        lines.extend(
+            [
+                "",
+                "Action learning guidance:",
+            ]
+        )
+
+        for guidance in (
+            result.action.learning_guidance
+        ):
+            lines.append(
+                f"  - {guidance}"
+            )
+
+    # --------------------------------------------------------------
+    # Strategy supporting memories
+    # --------------------------------------------------------------
+
     if result.strategy.supporting_memories:
         lines.extend(
             [
@@ -288,13 +540,38 @@ def build_planning_report(
             ]
         )
 
-        for memory in result.strategy.supporting_memories:
+        for memory in (
+            result.strategy.supporting_memories
+        ):
             experience = memory.experience
 
             lines.append(
                 f"  - {experience.action}"
                 f" (verified={experience.verified})"
             )
+
+    # --------------------------------------------------------------
+    # Strategy learning guidance
+    # --------------------------------------------------------------
+
+    if result.strategy.learning_guidance:
+        lines.extend(
+            [
+                "",
+                "Strategy learning guidance:",
+            ]
+        )
+
+        for guidance in (
+            result.strategy.learning_guidance
+        ):
+            lines.append(
+                f"  - {guidance}"
+            )
+
+    # --------------------------------------------------------------
+    # Strategy risks
+    # --------------------------------------------------------------
 
     if result.strategy.risks:
         lines.extend(
@@ -309,6 +586,10 @@ def build_planning_report(
                 f"  - {risk}"
             )
 
+    # --------------------------------------------------------------
+    # Missing dependencies
+    # --------------------------------------------------------------
+
     if result.ordering.missing_dependencies:
         lines.extend(
             [
@@ -317,13 +598,18 @@ def build_planning_report(
             ]
         )
 
-        for step_id, dependencies in (
-            result.ordering.missing_dependencies.items()
-        ):
+        for (
+            step_id,
+            dependencies,
+        ) in result.ordering.missing_dependencies.items():
             lines.append(
                 f"  - {step_id}: "
                 + ", ".join(dependencies)
             )
+
+    # --------------------------------------------------------------
+    # Dependency cycles
+    # --------------------------------------------------------------
 
     if result.ordering.cycles:
         lines.extend(
@@ -335,8 +621,13 @@ def build_planning_report(
 
         for cycle in result.ordering.cycles:
             lines.append(
-                "  - " + " -> ".join(cycle)
+                "  - "
+                + " -> ".join(cycle)
             )
+
+    # --------------------------------------------------------------
+    # Validation issues
+    # --------------------------------------------------------------
 
     if result.validation.issues:
         lines.extend(
@@ -359,6 +650,10 @@ def build_planning_report(
                 f"{issue.message}"
             )
 
+    # --------------------------------------------------------------
+    # Risk factors
+    # --------------------------------------------------------------
+
     if result.risk.factors:
         lines.extend(
             [
@@ -374,6 +669,10 @@ def build_planning_report(
                 f"{factor.description}"
             )
 
+    # --------------------------------------------------------------
+    # Risk recommendations
+    # --------------------------------------------------------------
+
     if result.risk.recommendations:
         lines.extend(
             [
@@ -382,7 +681,9 @@ def build_planning_report(
             ]
         )
 
-        for recommendation in result.risk.recommendations:
+        for recommendation in (
+            result.risk.recommendations
+        ):
             lines.append(
                 f"  - {recommendation}"
             )

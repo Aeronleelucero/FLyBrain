@@ -7,6 +7,12 @@ from dataclasses import dataclass, field
 from flycoder.tools.learning import (
     LearningContext,
     LearningMemory,
+    build_learning_guidance,
+)
+from flycoder.tools.learning_validation import (
+    LearningValidationResult,
+    build_validation_guidance,
+    validate_learning_context,
 )
 
 
@@ -31,6 +37,14 @@ class StrategyDecision:
     supporting_memories: list[LearningMemory] = field(
         default_factory=list
     )
+    learning_guidance: list[str] = field(
+        default_factory=list
+    )
+    validation_guidance: list[str] = field(
+        default_factory=list
+    )
+    trusted_memory_count: int = 0
+    rejected_memory_count: int = 0
     risks: list[str] = field(default_factory=list)
 
 
@@ -39,7 +53,10 @@ def _normalize_task(task: str) -> str:
     return " ".join(task.strip().split())
 
 
-def _contains_any(task: str, terms: tuple[str, ...]) -> bool:
+def _contains_any(
+    task: str,
+    terms: tuple[str, ...],
+) -> bool:
     """Return whether normalized task text contains any term."""
     return any(term in task for term in terms)
 
@@ -88,6 +105,35 @@ def _memory_support(
     return matches
 
 
+def _validated_support(
+    context: LearningContext,
+    strategy: str,
+    validation: LearningValidationResult,
+) -> list[LearningMemory]:
+    """
+    Return strategy-supporting memories that were not rejected.
+
+    LOW-trust memories remain available as cautionary evidence.
+    Rejected memories are excluded entirely.
+    """
+
+    rejected = {
+        id(memory.memory.experience)
+        for memory in validation.rejected_memories
+    }
+
+    supporting = _memory_support(
+        context,
+        strategy,
+    )
+
+    return [
+        memory
+        for memory in supporting
+        if id(memory.experience) not in rejected
+    ]
+
+
 def select_strategy(
     task: str,
     context: LearningContext | None = None,
@@ -96,7 +142,11 @@ def select_strategy(
     Select a deterministic coding strategy for a task.
 
     Strategy selection is advisory only. It does not modify files,
-    execute tools, or mutate the supplied learning context.
+    execute tools, mutate state, or grant execution permission.
+
+    Learning validation is also advisory. It excludes structurally
+    invalid memories while preserving low-trust memories as cautionary
+    evidence.
     """
 
     normalized_task = _normalize_task(task)
@@ -114,7 +164,24 @@ def select_strategy(
             ],
         )
 
-    learning = context or LearningContext(task=normalized_task)
+    learning = (
+        context
+        if context is not None
+        else LearningContext(task=normalized_task)
+    )
+
+    guidance = build_learning_guidance(
+        learning
+    )
+
+    validation = validate_learning_context(
+        learning
+    )
+
+    validation_guidance = build_validation_guidance(
+        validation
+    )
+
     task_lower = normalized_task.lower()
 
     if _contains_any(
@@ -221,41 +288,83 @@ def select_strategy(
             "Additional workspace inspection may be required."
         ]
 
-    supporting = _memory_support(
+    supporting = _validated_support(
         learning,
         strategy,
+        validation,
     )
 
-    if supporting:
-        verified_support = [
-            memory
-            for memory in supporting
-            if memory.experience.verified
-        ]
+    high_trust_support = [
+        memory
+        for memory in supporting
+        if any(
+            validated.memory is memory
+            and validated.trust_level == "HIGH"
+            for validated in validation.valid_memories
+        )
+    ]
 
-        if verified_support:
-            confidence = min(
-                1.0,
-                0.75 + (0.05 * len(verified_support)),
-            )
-            reason += (
-                " Similar verified experience supports this strategy."
-            )
-        else:
-            confidence = min(
-                1.0,
-                0.60 + (0.05 * len(supporting)),
-            )
-            reason += (
-                " Similar previous experience supports this strategy."
-            )
+    medium_trust_support = [
+        memory
+        for memory in supporting
+        if any(
+            validated.memory is memory
+            and validated.trust_level == "MEDIUM"
+            for validated in validation.valid_memories
+        )
+    ]
+
+    if high_trust_support:
+        confidence = min(
+            1.0,
+            0.75 + (0.05 * len(high_trust_support)),
+        )
+        reason += (
+            " Similar verified experience supports this strategy."
+        )
+
+    elif medium_trust_support:
+        confidence = min(
+            1.0,
+            0.60 + (0.05 * len(medium_trust_support)),
+        )
+        reason += (
+            " Similar moderate-trust experience supports this strategy."
+        )
+
+    elif supporting:
+        confidence = 0.55
+        reason += (
+            " Similar low-trust experience provides cautionary context."
+        )
+
     else:
         confidence = 0.55
+
+    if validation.rejected_memories:
+        risks.append(
+            "Some retrieved learning memories were rejected "
+            "during validation."
+        )
+
+    if validation.low_trust_memories:
+        risks.append(
+            "Some learning evidence is low trust and should "
+            "be treated cautiously."
+        )
 
     return StrategyDecision(
         strategy=strategy,
         reason=reason,
         confidence=confidence,
         supporting_memories=supporting,
+        learning_guidance=guidance,
+        validation_guidance=validation_guidance,
+        trusted_memory_count=len(
+            validation.trusted_memories
+        ),
+        rejected_memory_count=len(
+            validation.rejected_memories
+        ),
         risks=risks,
     )

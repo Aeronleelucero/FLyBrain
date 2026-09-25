@@ -12,6 +12,11 @@ from flycoder.tools.dependencies import build_dependency_graph
 from flycoder.tools.execution import observe_action
 from flycoder.tools.filesystem import Workspace
 from flycoder.tools.guardrails import check_guardrails
+from flycoder.tools.learning_feedback import (
+    build_learning_outcome,
+    record_learning_outcome,
+)
+from flycoder.tools.memory import MemoryStore
 from flycoder.tools.symbols import (
     analyze_symbols,
     build_symbol_report,
@@ -29,9 +34,27 @@ class FlyCoderAgent:
 
     MAX_REVIEW_FILES = 8
 
-    def __init__(self, workspace: str | Path):
+    def __init__(
+        self,
+        workspace: str | Path,
+        memory_store: MemoryStore | None = None,
+    ):
+        """Initialize the agent and its execution memory."""
+
         self.workspace = Workspace(workspace)
         self.actions = create_action_registry()
+
+        # Phase 9.7:
+        # Keep one memory store for the lifetime of this
+        # agent instance so execution feedback can accumulate.
+        #
+        # An external store may be supplied when callers want
+        # memory to survive across multiple agent instances.
+        self.memory_store = (
+            memory_store
+            if memory_store is not None
+            else MemoryStore()
+        )
 
     # ==============================================================
     # TASK CLASSIFICATION
@@ -122,6 +145,39 @@ class FlyCoderAgent:
             state.task_intent = self.classify_task(
                 state.task
             )
+
+    # ==============================================================
+    # LEARNING FILE EXTRACTION
+    # ==============================================================
+
+    def _learning_files(
+        self,
+        result: ActionResult,
+        state: CodingState,
+    ) -> list[str]:
+        """Extract files relevant to the recorded learning outcome.
+
+        File information is taken from the action result when the
+        action explicitly provides a file list. Otherwise the current
+        state file is used when available.
+
+        This function is observational only and does not mutate state.
+        """
+
+        if isinstance(result.data, dict):
+            files = result.data.get("files")
+
+            if isinstance(files, list):
+                return [
+                    file_path
+                    for file_path in files
+                    if isinstance(file_path, str)
+                ]
+
+        if state.current_file:
+            return [state.current_file]
+
+        return []
 
     # ==============================================================
     # TASK WORDS
@@ -738,6 +794,10 @@ class FlyCoderAgent:
 
         # ----------------------------------------------------------
         # Finish
+        #
+        # "finish" is a control-flow state rather than a coding
+        # action, so it is intentionally not recorded as a memory
+        # experience.
         # ----------------------------------------------------------
 
         if action == "finish":
@@ -1117,6 +1177,67 @@ class FlyCoderAgent:
                 "requires_human_input": (
                     observation.requires_human_input
                 ),
+            }
+
+        # ----------------------------------------------------------
+        # Phase 9.7 — LEARNING FEEDBACK
+        #
+        # Learning is observational only.
+        #
+        # It does NOT:
+        #   - execute another action
+        #   - modify workspace files
+        #   - grant approval
+        #   - bypass guardrails
+        #   - mutate CodingState
+        # ----------------------------------------------------------
+
+        learning_outcome = build_learning_outcome(
+            result,
+            state,
+        )
+
+        experience = record_learning_outcome(
+            self.memory_store,
+            learning_outcome,
+            files=self._learning_files(
+                result,
+                state,
+            ),
+        )
+
+        if isinstance(result.data, dict):
+            result.data["learning_feedback"] = {
+                "task": learning_outcome.task,
+                "task_intent": (
+                    learning_outcome.task_intent
+                ),
+                "action": learning_outcome.action,
+                "success": learning_outcome.success,
+                "strategy": learning_outcome.strategy,
+                "tests_run": (
+                    learning_outcome.tests_run
+                ),
+                "tests_passed": (
+                    learning_outcome.tests_passed
+                ),
+                "guardrail_blocked": (
+                    learning_outcome.guardrail_blocked
+                ),
+                "human_input_required": (
+                    learning_outcome.human_input_required
+                ),
+                "confidence_score": (
+                    learning_outcome.confidence_score
+                ),
+                "recovery_action": (
+                    learning_outcome.recovery_action
+                ),
+                "experience_recorded": True,
+                "memory_size": len(
+                    self.memory_store.experiences
+                ),
+                "verified": experience.verified,
             }
 
         return result
