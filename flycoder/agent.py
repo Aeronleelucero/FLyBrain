@@ -11,6 +11,7 @@ from flycoder.state import CodingState
 from flycoder.tools.dependencies import build_dependency_graph
 from flycoder.tools.execution import observe_action
 from flycoder.tools.filesystem import Workspace
+from flycoder.tools.guardrails import check_guardrails
 from flycoder.tools.symbols import (
     analyze_symbols,
     build_symbol_report,
@@ -827,14 +828,127 @@ class FlyCoderAgent:
             )
 
         # ----------------------------------------------------------
-        # Execute action
+        # Phase 9.6 — PRE-EXECUTION GUARDRAIL
         # ----------------------------------------------------------
 
-        result = self.actions.execute(
-            action,
-            workspace=self.workspace,
-            state=state,
+        preflight = ActionResult(
+            action=action,
+            success=True,
+            message=(
+                "Pre-execution guardrail check."
+            ),
         )
+
+        guardrail_decision = check_guardrails(
+            preflight,
+            state,
+        )
+
+        # ----------------------------------------------------------
+        # Block unsafe actions BEFORE execution.
+        #
+        # This is the Phase 9.6 execution boundary.
+        #
+        # Guardrails do not:
+        #   - execute actions
+        #   - select actions
+        #   - grant approval
+        #   - use confidence as permission
+        #   - use strategy as permission
+        #   - use recovery as permission
+        # ----------------------------------------------------------
+
+        if not guardrail_decision.allowed:
+
+            result = ActionResult(
+                action=action,
+                success=False,
+                message=guardrail_decision.reason,
+                data={
+                    "guardrail": {
+                        "allowed": (
+                            guardrail_decision.allowed
+                        ),
+                        "reason": (
+                            guardrail_decision.reason
+                        ),
+                        "violations": (
+                            guardrail_decision.violations
+                        ),
+                        "warnings": (
+                            guardrail_decision.warnings
+                        ),
+                        "requires_human_approval": (
+                            guardrail_decision
+                            .requires_human_approval
+                        ),
+                    },
+                },
+            )
+
+        else:
+
+            # ------------------------------------------------------
+            # Actual action execution
+            # ------------------------------------------------------
+
+            result = self.actions.execute(
+                action,
+                workspace=self.workspace,
+                state=state,
+            )
+
+            # ------------------------------------------------------
+            # Attach guardrail decision to execution result.
+            # ------------------------------------------------------
+
+            if result.data is None:
+                result.data = {}
+
+            if isinstance(result.data, dict):
+
+                result.data["guardrail"] = {
+                    "allowed": (
+                        guardrail_decision.allowed
+                    ),
+                    "reason": (
+                        guardrail_decision.reason
+                    ),
+                    "violations": (
+                        guardrail_decision.violations
+                    ),
+                    "warnings": (
+                        guardrail_decision.warnings
+                    ),
+                    "requires_human_approval": (
+                        guardrail_decision
+                        .requires_human_approval
+                    ),
+                }
+
+            else:
+
+                result.data = {
+                    "result": result.data,
+                    "guardrail": {
+                        "allowed": (
+                            guardrail_decision.allowed
+                        ),
+                        "reason": (
+                            guardrail_decision.reason
+                        ),
+                        "violations": (
+                            guardrail_decision.violations
+                        ),
+                        "warnings": (
+                            guardrail_decision.warnings
+                        ),
+                        "requires_human_approval": (
+                            guardrail_decision
+                            .requires_human_approval
+                        ),
+                    },
+                }
 
         # ----------------------------------------------------------
         # Record execution result
@@ -844,11 +958,49 @@ class FlyCoderAgent:
         state.last_action_success = result.success
         state.last_action_message = result.message
 
+        # ----------------------------------------------------------
         # Observe the result without executing another action.
+        #
+        # IMPORTANT:
+        # observe_action() remains advisory.
+        # It cannot bypass guardrails.
+        # ----------------------------------------------------------
+
         observation = observe_action(
             result,
             state,
         )
+
+        # ----------------------------------------------------------
+        # Display guardrail block
+        # ----------------------------------------------------------
+
+        if not guardrail_decision.allowed:
+
+            print()
+            print("Execution blocked by guardrails:")
+
+            for violation in (
+                guardrail_decision.violations
+            ):
+                print(
+                    f"  ❌ {violation}"
+                )
+
+            for warning in (
+                guardrail_decision.warnings
+            ):
+                print(
+                    f"  ⚠ {warning}"
+                )
+
+            if (
+                guardrail_decision
+                .requires_human_approval
+            ):
+                print(
+                    "  👤 Human approval/input is required."
+                )
 
         # ----------------------------------------------------------
         # Display analysis output
@@ -857,6 +1009,7 @@ class FlyCoderAgent:
         if (
             action == "explain_error"
             and result.data
+            and isinstance(result.data, dict)
         ):
             print()
             print("Error explanation:")
@@ -870,6 +1023,7 @@ class FlyCoderAgent:
         elif (
             action == "review_code"
             and result.data
+            and isinstance(result.data, dict)
         ):
             print()
             print("Code review:")
@@ -883,6 +1037,7 @@ class FlyCoderAgent:
         elif (
             action == "improve_code"
             and result.data
+            and isinstance(result.data, dict)
         ):
             print()
             print("Improvement proposal:")
@@ -909,7 +1064,10 @@ class FlyCoderAgent:
         # Update analysis state
         # ----------------------------------------------------------
 
-        if action in self.ANALYSIS_ACTIONS:
+        if (
+            result.success
+            and action in self.ANALYSIS_ACTIONS
+        ):
 
             if (
                 state.current_file
@@ -1066,6 +1224,15 @@ def cli() -> None:
             print(
                 f"  data={result.data}"
             )
+
+        # ----------------------------------------------------------
+        # Explicit CLI approval boundary
+        #
+        # This is intentionally NOT passed through automatic
+        # action selection or confidence.
+        #
+        # --approve is an explicit user-provided CLI authorization.
+        # ----------------------------------------------------------
 
         if (
             args.approve
