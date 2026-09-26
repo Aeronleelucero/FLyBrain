@@ -8,6 +8,10 @@ from pathlib import Path
 from flycoder.actions import create_action_registry
 from flycoder.actions.registry import ActionResult
 from flycoder.state import CodingState
+from flycoder.tools.autonomous import (
+    AutonomousTaskResult,
+    run_autonomous_task,
+)
 from flycoder.tools.dependencies import build_dependency_graph
 from flycoder.tools.execution import observe_action
 from flycoder.tools.filesystem import Workspace
@@ -631,6 +635,38 @@ class FlyCoderAgent:
             return "run_tests"
 
         return "finish"
+
+    # ==============================================================
+    # AUTONOMOUS TASK EXECUTION
+    # ==============================================================
+
+    def run_task(
+        self,
+        task: str,
+        *,
+        max_iterations: int = 20,
+    ) -> AutonomousTaskResult:
+        """Run a task through the autonomous orchestration layer.
+
+        Each iteration delegates to ``run_once()`` through the
+        autonomous orchestration system.
+
+        The autonomous layer preserves the existing decision,
+        guardrail, observation, recovery, learning, and
+        human-approval boundaries.
+
+        It never automatically approves a repair.
+        """
+
+        state = CodingState(
+            task=task,
+        )
+
+        return run_autonomous_task(
+            self,
+            state,
+            max_iterations=max_iterations,
+        )
 
     # ==============================================================
     # REVIEW REPORT
