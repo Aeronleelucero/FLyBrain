@@ -7,6 +7,10 @@ from typing import TYPE_CHECKING
 
 from flycoder.actions.registry import ActionResult
 from flycoder.state import CodingState
+from flycoder.tools.confidence import (
+    ConfidenceAssessment,
+    assess_confidence,
+)
 from flycoder.tools.completion_evidence import (
     CompletionEvidence,
     VerificationRecord,
@@ -31,7 +35,12 @@ from flycoder.tools.progress_report import (
     build_progress_report,
 )
 from flycoder.tools.repetition import ActionRepetitionTracker
-from flycoder.tools.recovery import RecoveryDecision, recover_from_failure
+from flycoder.tools.recovery import (
+    RecoveryAssessment,
+    RecoveryDecision,
+    RecoveryHistory,
+    recover_from_failure,
+)
 from flycoder.tools.stall import StallAssessment, assess_stall
 from flycoder.tools.task_lifecycle import (
     TASK_BLOCKED,
@@ -77,6 +86,10 @@ class AutonomousStep:
     # Phase 10.4.6: task-level progress and evidence after this step.
     progress_snapshot: TaskProgressSnapshot | None = None
     completion_evidence: CompletionEvidence | None = None
+    # Phase 10.6: recovery history assessment (failures only) and the
+    # Phase 9 decision confidence, both observational.
+    recovery_assessment: RecoveryAssessment | None = None
+    confidence: ConfidenceAssessment | None = None
 
 
 @dataclass
@@ -93,6 +106,7 @@ class AutonomousTaskResult:
     progress_history: ProgressHistory | None = None
     completion_evidence: CompletionEvidence | None = None
     progress_report: ProgressReport | None = None
+    recovery_history: RecoveryHistory | None = None
 
     @property
     def completed(self) -> bool:
@@ -190,6 +204,7 @@ def _finish_result(
     history: ProgressHistory,
     evidence: CompletionEvidence,
     intent: str,
+    recovery_history: RecoveryHistory | None = None,
 ) -> AutonomousTaskResult:
     """Build the final autonomous task result and its progress report.
 
@@ -209,6 +224,7 @@ def _finish_result(
         lifecycle=lifecycle,
         progress_history=history,
         completion_evidence=evidence,
+        recovery_history=recovery_history,
         progress_report=build_progress_report(
             state,
             history,
@@ -324,14 +340,21 @@ def _build_iteration_decision(
     recovery: RecoveryDecision | None,
     stall: StallAssessment,
     repetition_tracker: ActionRepetitionTracker,
+    recovery_assessment: RecoveryAssessment | None = None,
 ) -> IterationDecision:
     """Build the advisory decision for the current iteration."""
 
     repetition = repetition_tracker.assess()
 
+    recovery_exhausted = (
+        recovery_assessment is not None
+        and recovery_assessment.should_escalate
+    )
+
     recovery_available = (
         recovery is not None
         and recovery.recovery_action is not None
+        and not recovery_exhausted
     )
 
     return decide_iteration(
@@ -341,6 +364,10 @@ def _build_iteration_decision(
         recovery_available=recovery_available,
         stall=stall,
         repetition=repetition,
+        recovery_exhausted=recovery_exhausted,
+        recovery_reason=(
+            recovery_assessment.reason if recovery_exhausted else ""
+        ),
     )
 
 
@@ -424,6 +451,7 @@ def run_autonomous_task(
     evidence = evaluate_evidence()
 
     lifecycle = TaskLifecycle(task=state.task)
+    recovery_history = RecoveryHistory()
     progress_tracker = ProgressTracker()
     repetition_tracker = ActionRepetitionTracker()
 
@@ -462,6 +490,7 @@ def run_autonomous_task(
                 history=progress_history,
                 evidence=evidence,
                 intent=intent,
+                recovery_history=recovery_history,
             )
 
         result = agent.run_once(state)
@@ -486,6 +515,18 @@ def run_autonomous_task(
 
         progress_tracker.record(iteration_observation)
 
+        # Phase 10.6: failures are recorded across iterations so a
+        # repeat without new information is escalated, not retried.
+        recovery_assessment = None
+
+        if recovery is not None and not result.success:
+            recovery_assessment = recovery_history.record(
+                iteration,
+                result,
+                recovery,
+                iteration_observation.state_signature,
+            )
+
         repetition_tracker.record(result.action)
 
         stall = assess_stall(progress_tracker)
@@ -496,6 +537,7 @@ def run_autonomous_task(
             recovery=recovery,
             stall=stall,
             repetition_tracker=repetition_tracker,
+            recovery_assessment=recovery_assessment,
         )
 
         # Phase 10.4.6: observe task-level progress and re-evaluate
@@ -519,6 +561,8 @@ def run_autonomous_task(
             iteration_decision=iteration_decision,
             progress_snapshot=progress_snapshot,
             completion_evidence=evidence,
+            recovery_assessment=recovery_assessment,
+            confidence=assess_confidence(result, state),
         )
 
         steps.append(step)
@@ -559,6 +603,7 @@ def run_autonomous_task(
                 history=progress_history,
                 evidence=evidence,
                 intent=intent,
+                recovery_history=recovery_history,
             )
 
         if _guardrail_blocked(result):
@@ -580,6 +625,7 @@ def run_autonomous_task(
                 history=progress_history,
                 evidence=evidence,
                 intent=intent,
+                recovery_history=recovery_history,
             )
 
         if state.finished:
@@ -599,6 +645,7 @@ def run_autonomous_task(
                 history=progress_history,
                 evidence=evidence,
                 intent=intent,
+                recovery_history=recovery_history,
             )
 
         if iteration_decision.should_escalate:
@@ -618,6 +665,7 @@ def run_autonomous_task(
                 history=progress_history,
                 evidence=evidence,
                 intent=intent,
+                recovery_history=recovery_history,
             )
 
         if iteration_decision.should_stop:
@@ -637,6 +685,7 @@ def run_autonomous_task(
                 history=progress_history,
                 evidence=evidence,
                 intent=intent,
+                recovery_history=recovery_history,
             )
 
         if not result.success:
@@ -659,6 +708,7 @@ def run_autonomous_task(
                     history=progress_history,
                     evidence=evidence,
                     intent=intent,
+                    recovery_history=recovery_history,
                 )
 
         # The autonomous layer intentionally does not execute
@@ -690,4 +740,5 @@ def run_autonomous_task(
         history=progress_history,
         evidence=evidence,
         intent=intent,
+        recovery_history=recovery_history,
     )

@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 from flycoder.actions.registry import ActionResult
 from flycoder.state import CodingState
+from flycoder.tools.human_input import human_input_violations
 
 
 @dataclass
@@ -138,6 +139,12 @@ def check_state_consistency(
         violations.append(
             "tests_passed cannot be true when tests_run is false."
         )
+
+    # ----------------------------------------------------------
+    # Human input boundary (Phase 10.6)
+    # ----------------------------------------------------------
+
+    violations.extend(human_input_violations(state))
 
     return violations, warnings
 

@@ -4,6 +4,7 @@ from flycoder.actions.registry import ActionResult
 from flycoder.state import CodingState
 from flycoder.tools.filesystem import Workspace
 from flycoder.tools.freshness import record_code_change
+from flycoder.tools.human_input import clear_human_input
 
 
 def rollback_repair_action(
@@ -64,7 +65,7 @@ def rollback_repair_action(
     state.repair_proposed = False
     state.proposed_content = None
     state.repair_original_content = None
-    state.user_input_needed = False
+    clear_human_input(state)
 
     # The workspace code changed, so earlier test results describe code
     # that no longer exists and a fresh test run is required.

@@ -47,6 +47,8 @@ def decide_iteration(
     recovery_available: bool = False,
     stall: StallAssessment | None = None,
     repetition: RepetitionAssessment | None = None,
+    recovery_exhausted: bool = False,
+    recovery_reason: str = "",
 ) -> IterationDecision:
     """Determine whether another autonomous iteration is justified.
 
@@ -67,6 +69,18 @@ def decide_iteration(
         return IterationDecision(
             decision=ITERATION_VERIFY,
             reason="The task has been marked finished and should be verified.",
+        )
+
+    # Phase 10.6: recovery that no longer produces new information is
+    # escalated instead of retried.
+    if recovery_exhausted:
+        return IterationDecision(
+            decision=ITERATION_ESCALATE,
+            reason=(
+                "Recovery is exhausted"
+                + (f": {recovery_reason}" if recovery_reason else ".")
+            ),
+            risks=["Further automatic recovery would repeat failures."],
         )
 
     if stall is not None:

@@ -7,6 +7,10 @@ from flycoder.tools.complexity import analyze_complexity
 from flycoder.tools.control_flow import analyze_control_flow
 from flycoder.tools.data_flow import analyze_data_flow
 from flycoder.tools.filesystem import Workspace
+from flycoder.tools.human_input import (
+    HUMAN_INPUT_REPAIR_APPROVAL,
+    request_human_input,
+)
 from flycoder.tools.references import analyze_references
 from flycoder.tools.symbols import (
     SymbolGraph,
@@ -467,7 +471,7 @@ def improve_code_action(
     )
     state.proposed_content = proposed_content
     state.repair_proposed = True
-    state.user_input_needed = True
+    request_human_input(state, HUMAN_INPUT_REPAIR_APPROVAL)
 
     return ActionResult(
         action="improve_code",

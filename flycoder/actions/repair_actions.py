@@ -7,6 +7,11 @@ from flycoder.tools.changes import (
     create_change_proposal,
 )
 from flycoder.tools.filesystem import Workspace
+from flycoder.tools.human_input import (
+    HUMAN_INPUT_NO_SAFE_REPAIR,
+    HUMAN_INPUT_REPAIR_APPROVAL,
+    request_human_input,
+)
 
 
 def propose_repair_action(
@@ -46,6 +51,10 @@ def propose_repair_action(
         )
 
     else:
+        # Insufficient evidence for a safe repair: never manufacture one.
+        # Stop at the human boundary so the attempt is not repeated.
+        request_human_input(state, HUMAN_INPUT_NO_SAFE_REPAIR)
+
         return ActionResult(
             action="propose_repair",
             success=False,
@@ -69,6 +78,8 @@ def propose_repair_action(
     )
 
     if not proposal.changed:
+        request_human_input(state, HUMAN_INPUT_NO_SAFE_REPAIR)
+
         return ActionResult(
             action="propose_repair",
             success=False,
@@ -83,7 +94,9 @@ def propose_repair_action(
     state.repair_proposed = True
     state.repair_approved = False
     state.repair_applied = False
-    state.user_input_needed = True
+
+    # The proposal stops at the approval boundary. Nothing was written.
+    request_human_input(state, HUMAN_INPUT_REPAIR_APPROVAL)
 
     return ActionResult(
         action="propose_repair",

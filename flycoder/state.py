@@ -188,4 +188,8 @@ class CodingState:
 
     user_input_needed: bool = False
 
+    # Why user_input_needed was set (Phase 10.6). One of the reasons in
+    # flycoder.tools.human_input; None when no reason was recorded.
+    human_input_reason: str | None = None
+
     finished: bool = False

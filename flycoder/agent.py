@@ -22,6 +22,7 @@ from flycoder.tools.learning_feedback import (
     record_learning_outcome,
 )
 from flycoder.tools.memory import MemoryStore
+from flycoder.tools.recovery import repair_evidence_sufficient
 from flycoder.tools.symbols import (
     analyze_symbols,
     build_symbol_report,
@@ -601,7 +602,24 @@ class FlyCoderAgent:
                 return "improve_code"
 
         # ----------------------------------------------------------
+        # Human boundary (Phase 10.6)
+        #
+        # While explicit human input is pending (repair approval,
+        # insufficient diagnosis, no safe repair, ...), every action is
+        # blocked by the guardrails. Stop instead of choosing actions
+        # that can only be blocked; this is what previously left the
+        # CLI looping on blocked read_file calls.
+        # ----------------------------------------------------------
+
+        if state.user_input_needed:
+            return "finish"
+
+        # ----------------------------------------------------------
         # Repair workflow
+        #
+        # Diagnosis (fix_error) continues into read-only investigation
+        # (read_file) and proposal preparation (propose_repair). The
+        # proposal stops at the approval boundary; nothing is applied.
         # ----------------------------------------------------------
 
         if (
@@ -617,16 +635,8 @@ class FlyCoderAgent:
         ):
             return "read_file"
 
-        if (
-            state.task_intent == "repair"
-            and state.error_inspected
-            and state.current_file_content is not None
-            and not state.repair_proposed
-        ):
+        if repair_evidence_sufficient(state):
             return "propose_repair"
-
-        if state.user_input_needed:
-            return "finish"
 
         # ----------------------------------------------------------
         # Phase 10.5 — verification of an applied change

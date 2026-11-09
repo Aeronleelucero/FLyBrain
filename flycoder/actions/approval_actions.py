@@ -4,6 +4,11 @@ from flycoder.actions.registry import ActionResult
 from flycoder.state import CodingState
 from flycoder.tools.filesystem import Workspace
 from flycoder.tools.freshness import record_code_change
+from flycoder.tools.human_input import (
+    HUMAN_INPUT_STALE_PROPOSAL,
+    clear_human_input,
+    request_human_input,
+)
 
 
 def approve_repair_action(
@@ -43,7 +48,7 @@ def approve_repair_action(
     ):
         state.repair_approved = False
         state.repair_applied = False
-        state.user_input_needed = True
+        request_human_input(state, HUMAN_INPUT_STALE_PROPOSAL)
 
         return ActionResult(
             action="approve_repair",
@@ -70,7 +75,7 @@ def approve_repair_action(
     state.current_file_content = state.proposed_content
     state.repair_approved = True
     state.repair_applied = True
-    state.user_input_needed = False
+    clear_human_input(state)
     state.last_error = None
     state.error_inspected = False
 
