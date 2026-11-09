@@ -65,6 +65,12 @@ def rollback_repair_action(
     state.repair_original_content = None
     state.user_input_needed = False
 
+    # The workspace code changed, so earlier test results describe code
+    # that no longer exists. Mirror approve_repair_action and require a
+    # fresh test run instead of reporting stale verification.
+    state.tests_run = False
+    state.tests_passed = False
+
     return ActionResult(
         action="rollback_repair",
         success=True,
