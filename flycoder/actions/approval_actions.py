@@ -3,6 +3,7 @@
 from flycoder.actions.registry import ActionResult
 from flycoder.state import CodingState
 from flycoder.tools.filesystem import Workspace
+from flycoder.tools.freshness import record_code_change
 
 
 def approve_repair_action(
@@ -70,10 +71,12 @@ def approve_repair_action(
     state.repair_approved = True
     state.repair_applied = True
     state.user_input_needed = False
-    state.tests_run = False
-    state.tests_passed = False
     state.last_error = None
     state.error_inspected = False
+
+    # The file changed: earlier test results no longer apply.
+    # Approval itself does not verify anything.
+    record_code_change(state)
 
     return ActionResult(
         action="approve_repair",

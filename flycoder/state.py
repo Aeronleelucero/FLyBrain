@@ -1,6 +1,7 @@
 """State definitions for the FLY-CODER agent."""
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from flycoder.tools.code_paths import CodePath
 from flycoder.tools.complexity import ComplexityInfo
@@ -16,6 +17,9 @@ from flycoder.tools.symbols import (
     Symbol,
     SymbolGraph,
 )
+
+if TYPE_CHECKING:
+    from flycoder.tools.completion_evidence import VerificationRecord
 
 
 @dataclass
@@ -129,6 +133,23 @@ class CodingState:
     tests_run: bool = False
 
     error_inspected: bool = False
+
+    # ----------------------------------------------------------
+    # Verification freshness (Phase 10.5)
+    #
+    # code_version increases on every successful code modification
+    # made through an agent action. tests_code_version records which
+    # code version the last test run verified (None: recorded before
+    # versioning, i.e. version 0). See flycoder.tools.freshness.
+    # ----------------------------------------------------------
+
+    code_version: int = 0
+
+    tests_code_version: int | None = None
+
+    # Latest Phase 7 verification pipeline result, bound to the code
+    # signature it verified (a completion_evidence.VerificationRecord).
+    verification_record: "VerificationRecord | None" = None
 
     # ----------------------------------------------------------
     # Adaptive execution

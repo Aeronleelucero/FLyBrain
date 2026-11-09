@@ -59,6 +59,9 @@ AUTONOMOUS_MAX_ITERATIONS = "MAX_ITERATIONS"
 # says why (FAILED, MISSING, STALE, INCOMPLETE or INCONSISTENT).
 AUTONOMOUS_UNVERIFIED = "UNVERIFIED"
 
+# Agent action that runs the Phase 7 verification pipeline (Phase 10.5).
+VERIFICATION_ACTION = "verify_changes"
+
 
 @dataclass
 class AutonomousStep:
@@ -216,6 +219,38 @@ def _finish_result(
     )
 
 
+def _record_verification_phase(
+    lifecycle: TaskLifecycle,
+    result: ActionResult,
+    evidence: CompletionEvidence,
+) -> None:
+    """Bracket an executed verification in the lifecycle.
+
+    Verification runs as an ordinary agent action, so it already passed
+    the guardrails. The lifecycle records it as RUNNING -> VERIFYING ->
+    RUNNING. Completion is never decided here: COMPLETED is only reached
+    through ``_complete_finished_task`` with VERIFIED evidence, and a
+    failed verification returns to execution, where the agent inspects
+    the failure and the human approval boundary still applies.
+    """
+
+    if lifecycle.status != TASK_RUNNING:
+        return
+
+    lifecycle.transition(
+        TASK_VERIFYING,
+        "The verification pipeline ran for the applied change.",
+    )
+
+    outcome = "passed" if result.success else "failed"
+
+    lifecycle.transition(
+        TASK_RUNNING,
+        f"Verification {outcome} (evidence {evidence.status}); "
+        "returning to execution.",
+    )
+
+
 def _resolve_intent(agent: FlyCoderAgent, state: CodingState) -> str:
     """Return the task intent without mutating state.
 
@@ -341,10 +376,18 @@ def run_autonomous_task(
     * The final result carries the history, the latest evidence, and a
       ``ProgressReport``.
 
+    Phase 10.5 verification:
+
+    * The agent runs the Phase 7 pipeline as the ``verify_changes``
+      action after an applied change, through the normal guardrails.
+      The loop records it as RUNNING -> VERIFYING -> RUNNING.
+    * The record that action stores on ``state.verification_record`` is
+      the latest evidence and takes precedence over ``verification``.
+
     Args:
         verification: Optional Phase 7 pipeline result already bound to
-            a code signature with ``record_verification``. The loop does
-            not run the pipeline itself.
+            a code signature with ``record_verification``, used when the
+            state holds no verification record of its own.
 
     Progress tracking and evidence are observational. They never
     select or execute actions, mutate state, or approve repairs.
@@ -362,9 +405,12 @@ def run_autonomous_task(
     intent = _resolve_intent(agent, state)
 
     def evaluate_evidence() -> CompletionEvidence:
+        # The state's own record is produced by the latest
+        # verify_changes run, so it is newer than any record supplied
+        # when the run started.
         return evaluate_completion_evidence(
             state,
-            verification,
+            state.verification_record or verification,
             state.task_intent or intent,
         )
 
@@ -478,6 +524,12 @@ def run_autonomous_task(
         steps.append(step)
 
         _record_step(lifecycle, iteration, result)
+
+        if (
+            result.action == VERIFICATION_ACTION
+            and not _guardrail_blocked(result)
+        ):
+            _record_verification_phase(lifecycle, result, evidence)
 
         previous_signature = iteration_observation.state_signature
 

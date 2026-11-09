@@ -5,16 +5,18 @@ Progress is not proof of completion. This module decides whether the
 
 Evidence sources
 ----------------
-1. ``CodingState`` test results written by ``run_tests_action``
-   (``tests_run``, ``tests_passed``, ``last_error``). Their freshness is
-   guaranteed by the actions that change code: ``approve_repair_action``
-   and ``rollback_repair_action`` reset ``tests_run``/``tests_passed``,
-   so a recorded pass always describes the current agent-applied code.
+1. ``CodingState`` test results written by ``run_tests_action`` or
+   ``verify_changes_action`` (``tests_run``, ``tests_passed``,
+   ``last_error``). Since Phase 10.5 each run records the code version
+   it verified (``tests_code_version``); results for an older version
+   are stale (see ``flycoder.tools.freshness``).
 2. Phase 7 ``VerificationPipelineResult`` objects wrapped in a
    ``VerificationRecord``. A pipeline result carries no link to the code
    it verified, so the record stamps it with ``build_code_signature``
    at capture time. A signature mismatch at evaluation time makes the
-   record stale, and stale evidence never counts.
+   record stale, and stale evidence never counts. The latest record
+   produced by ``verify_changes_action`` is kept on
+   ``state.verification_record`` and used when none is passed in.
 
 Safety decisions
 ----------------
@@ -40,6 +42,12 @@ import hashlib
 from dataclasses import dataclass
 
 from flycoder.state import CodingState
+from flycoder.tools.freshness import (
+    freshness_violations,
+    tested_code_version,
+    tests_current,
+    tests_stale,
+)
 from flycoder.tools.guardrails import check_state_consistency
 from flycoder.tools.task_progress import (
     INTENT_MILESTONES,
@@ -140,6 +148,22 @@ def record_verification(
     return VerificationRecord(
         result=copy.deepcopy(result),
         code_signature=build_code_signature(state),
+    )
+
+
+def verification_is_current(state: CodingState) -> bool:
+    """Return whether the state's verification record is fresh.
+
+    A record is current when it was produced for the code signature the
+    state holds now. This only says the record applies to the current
+    code, not that it passed.
+    """
+
+    record = state.verification_record
+
+    return (
+        isinstance(record, VerificationRecord)
+        and record.code_signature == build_code_signature(state)
     )
 
 
@@ -330,7 +354,8 @@ def evaluate_completion_evidence(
     Args:
         state: Current task state. It is read, never modified.
         verification: Optional pipeline result bound to a code signature
-            by ``record_verification``.
+            by ``record_verification``. Defaults to
+            ``state.verification_record``.
         intent: Task intent; defaults to ``state.task_intent``.
 
     Raises:
@@ -339,6 +364,9 @@ def evaluate_completion_evidence(
     """
 
     resolved_intent = build_progress_model(intent or state.task_intent).intent
+
+    if verification is None:
+        verification = state.verification_record
 
     if verification is not None and not isinstance(
         verification,
@@ -406,6 +434,7 @@ def evaluate_completion_evidence(
     # --------------------------------------------------------------
 
     violations, _ = check_state_consistency(state)
+    violations = violations + freshness_violations(state)
 
     if fresh_record is not None:
         violations = violations + _record_inconsistencies(fresh_record, state)
@@ -428,8 +457,8 @@ def evaluate_completion_evidence(
 
         return finish(
             EVIDENCE_NEEDS_APPROVAL,
-            tests_run=state.tests_run,
-            tests_passed=state.tests_run and state.tests_passed,
+            tests_run=tests_current(state),
+            tests_passed=tests_current(state) and state.tests_passed,
         )
 
     if approval_granted:
@@ -474,8 +503,17 @@ def evaluate_completion_evidence(
     # 4. Test-verified intents: passing tests on current code.
     # --------------------------------------------------------------
 
-    state_tests_run = state.tests_run
-    state_tests_passed = state.tests_run and state.tests_passed
+    # Only test results recorded for the current code version count.
+    state_tests_run = tests_current(state)
+    state_tests_passed = state_tests_run and state.tests_passed
+    stale_tests = tests_stale(state)
+
+    if stale_tests:
+        reasons.append(
+            "Recorded test results are stale: they verified code version "
+            f"{tested_code_version(state)}, but the current code version "
+            f"is {state.code_version}. They are ignored."
+        )
 
     errors: list[str] = []
 
@@ -534,7 +572,7 @@ def evaluate_completion_evidence(
             criteria=True,
         )
 
-    if verification is not None:
+    if verification is not None or stale_tests:
         return finish(EVIDENCE_STALE)
 
     if state.repair_applied:

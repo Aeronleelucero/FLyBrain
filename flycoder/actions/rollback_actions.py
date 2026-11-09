@@ -3,6 +3,7 @@
 from flycoder.actions.registry import ActionResult
 from flycoder.state import CodingState
 from flycoder.tools.filesystem import Workspace
+from flycoder.tools.freshness import record_code_change
 
 
 def rollback_repair_action(
@@ -66,10 +67,8 @@ def rollback_repair_action(
     state.user_input_needed = False
 
     # The workspace code changed, so earlier test results describe code
-    # that no longer exists. Mirror approve_repair_action and require a
-    # fresh test run instead of reporting stale verification.
-    state.tests_run = False
-    state.tests_passed = False
+    # that no longer exists and a fresh test run is required.
+    record_code_change(state)
 
     return ActionResult(
         action="rollback_repair",

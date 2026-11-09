@@ -28,7 +28,6 @@ from flycoder.tools.completion_evidence import (
     EVIDENCE_NEEDS_APPROVAL,
     EVIDENCE_STALE,
     EVIDENCE_VERIFIED,
-    METHOD_STATE_TESTS,
     METHOD_VERIFICATION_PIPELINE,
     record_verification,
 )
@@ -412,7 +411,9 @@ def first_run_to_human_boundary(tmp_path):
     return agent, state
 
 
-def test_resumed_run_after_human_approval_verifies_with_state_tests(tmp_path):
+def test_resumed_run_after_human_approval_verifies_with_pipeline(tmp_path):
+    # Phase 10.5: an applied change is verified with the Phase 7
+    # pipeline (verify_changes) instead of a plain run_tests.
     agent, state = first_run_to_human_boundary(tmp_path)
 
     human_approves_repair(agent.workspace, state)
@@ -420,11 +421,15 @@ def test_resumed_run_after_human_approval_verifies_with_state_tests(tmp_path):
     second = run_quietly(agent, state, max_iterations=10)
 
     assert [step.result.action for step in second.steps] == [
-        "run_tests",
+        "verify_changes",
         "finish",
     ]
     assert second.status == AUTONOMOUS_COMPLETED
-    assert second.completion_evidence.verification_method == METHOD_STATE_TESTS
+    assert (
+        second.completion_evidence.verification_method
+        == METHOD_VERIFICATION_PIPELINE
+    )
+    assert second.completion_evidence.verification is state.verification_record
     assert second.completion_evidence.human_approval_granted
     assert second.progress_history.first.next_milestone == "tests_run"
 
@@ -452,7 +457,15 @@ def test_resumed_run_uses_fresh_pipeline_record(tmp_path):
         second.completion_evidence.verification_method
         == METHOD_VERIFICATION_PIPELINE
     )
-    assert second.completion_evidence.verification is record
+
+    # The agent's own verification run is newer than the supplied record
+    # and takes precedence; both describe the same code.
+    latest = second.completion_evidence.verification
+
+    assert latest is state.verification_record
+    assert latest is not record
+    assert latest.code_signature == record.code_signature
+    assert latest.result.verified
 
 
 def test_stale_record_is_never_proof(tmp_path):

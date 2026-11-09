@@ -3,6 +3,7 @@
 from flycoder.actions.registry import ActionResult
 from flycoder.state import CodingState
 from flycoder.tools.filesystem import Workspace
+from flycoder.tools.freshness import record_code_change
 
 
 def inspect_files_action(
@@ -74,6 +75,10 @@ def write_file_action(
 
     state.current_file = file_path
     state.current_file_content = content
+
+    # Only reached after a successful write; a failed write raises
+    # before this point and leaves earlier test results intact.
+    record_code_change(state)
 
     return ActionResult(
         action="write_code",

@@ -89,6 +89,37 @@ def observe_action(
         )
 
     # ----------------------------------------------------------
+    # Verification of an applied change (Phase 10.5)
+    # ----------------------------------------------------------
+
+    if action == "verify_changes":
+        if result.success:
+            return ExecutionObservation(
+                action=action,
+                success=True,
+                message=result.message,
+                next_action=None,
+                reason=(
+                    "The applied change passed verification. Completion "
+                    "is still decided by completion evidence."
+                ),
+            )
+
+        return ExecutionObservation(
+            action=action,
+            success=False,
+            message=result.message,
+            next_action="fix_error" if state.last_error else None,
+            reason=(
+                "Verification failed, so the failure should be inspected "
+                "before any further change is proposed."
+            ),
+            risks=[
+                "A failed verification never authorizes a repair."
+            ],
+        )
+
+    # ----------------------------------------------------------
     # Error inspection
     # ----------------------------------------------------------
 

@@ -38,9 +38,21 @@ READ_ONLY_ACTIONS = {
 }
 
 
-KNOWN_ACTIONS = READ_ONLY_ACTIONS | REPAIR_SENSITIVE_ACTIONS | {
-    "fix_error",
+# Runs the Phase 7 verification pipeline. It executes tests but never
+# modifies files; it is only meaningful for an applied code change.
+VERIFICATION_ACTIONS = {
+    "verify_changes",
 }
+
+
+KNOWN_ACTIONS = (
+    READ_ONLY_ACTIONS
+    | REPAIR_SENSITIVE_ACTIONS
+    | VERIFICATION_ACTIONS
+    | {
+        "fix_error",
+    }
+)
 
 
 def check_state_consistency(
@@ -150,6 +162,19 @@ def check_action_safety(
         return violations, warnings
 
     if action in READ_ONLY_ACTIONS:
+        return violations, warnings
+
+    if action == "verify_changes":
+        if not state.repair_applied:
+            violations.append(
+                "verify_changes requires an applied code change."
+            )
+
+        if state.repair_applied and not state.repair_approved:
+            violations.append(
+                "verify_changes cannot verify an unapproved change."
+            )
+
         return violations, warnings
 
     if action == "fix_error":

@@ -42,6 +42,8 @@ ALLOWED_TRANSITIONS: dict[str, set[str]] = {
     TASK_VERIFYING: {
         TASK_COMPLETED,
         TASK_FAILED,
+        # Phase 10.5: verification ran and execution continues.
+        TASK_RUNNING,
     },
     TASK_COMPLETED: set(),
     TASK_FAILED: set(),

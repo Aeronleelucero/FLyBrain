@@ -32,6 +32,9 @@ def classify_failure(result: ActionResult) -> str:
     if action == "run_tests":
         return "test_failure"
 
+    if action == "verify_changes":
+        return "verification_failure"
+
     if action == "read_file":
         return "read_failure"
 
@@ -93,6 +96,37 @@ def recover_from_failure(
             risks=[
                 "The failure may be caused by the test environment.",
                 "The root cause should be identified before modifying code.",
+            ],
+            retry_allowed=False,
+        )
+
+    if failure_type == "verification_failure":
+        if not state.last_error:
+            return RecoveryDecision(
+                action=result.action,
+                failed=True,
+                recovery_action=None,
+                reason=(
+                    "Verification could not run and produced no failure "
+                    "details to inspect."
+                ),
+                risks=[
+                    "Verification preconditions may not be satisfied.",
+                ],
+                retry_allowed=False,
+            )
+
+        return RecoveryDecision(
+            action=result.action,
+            failed=True,
+            recovery_action="fix_error",
+            reason=(
+                "Verification of the applied change failed. Inspect the "
+                "failure; any further repair still needs explicit approval."
+            ),
+            risks=[
+                "Do not retry verification without a code change.",
+                "Do not propose or apply a repair without human approval.",
             ],
             retry_allowed=False,
         )

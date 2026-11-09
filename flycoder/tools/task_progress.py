@@ -23,6 +23,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from flycoder.state import CodingState
+from flycoder.tools.freshness import tests_current, tests_stale
 from flycoder.tools.iteration import IterationObservation
 
 
@@ -187,7 +188,7 @@ def _failure_observed(state: CodingState) -> bool:
     """
 
     return bool(
-        (state.tests_run and not state.tests_passed)
+        (tests_current(state) and not state.tests_passed)
         or state.last_error
         or state.error_inspected
         or state.repair_proposed
@@ -198,7 +199,7 @@ def _repair_not_needed(state: CodingState) -> bool:
     """Return whether tests pass without any repair being involved."""
 
     return (
-        state.tests_run
+        tests_current(state)
         and state.tests_passed
         and not _failure_observed(state)
     )
@@ -261,8 +262,14 @@ def _eval_tests_run(
     state: CodingState,
     intent: str,
 ) -> _Evaluation:
-    if state.tests_run:
+    if tests_current(state):
         return _achieved("Tests have been run on the current code.")
+
+    if tests_stale(state):
+        return _pending(
+            "Recorded test results are stale; the code changed after "
+            "they ran."
+        )
 
     if state.repair_applied:
         return _pending(
@@ -326,11 +333,14 @@ def _eval_tests_passed(
     state: CodingState,
     intent: str,
 ) -> _Evaluation:
-    if state.tests_run and state.tests_passed:
+    if tests_current(state) and state.tests_passed:
         return _achieved("Tests pass on the current code.")
 
-    if state.tests_run:
+    if tests_current(state):
         return _pending("Tests ran and failed.")
+
+    if tests_stale(state):
+        return _pending("Recorded test results are stale.")
 
     return _pending("Tests have not been run on the current code.")
 

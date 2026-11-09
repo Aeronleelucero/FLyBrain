@@ -12,6 +12,7 @@ from flycoder.tools.autonomous import (
     AutonomousTaskResult,
     run_autonomous_task,
 )
+from flycoder.tools.completion_evidence import verification_is_current
 from flycoder.tools.dependencies import build_dependency_graph
 from flycoder.tools.execution import observe_action
 from flycoder.tools.filesystem import Workspace
@@ -626,6 +627,23 @@ class FlyCoderAgent:
 
         if state.user_input_needed:
             return "finish"
+
+        # ----------------------------------------------------------
+        # Phase 10.5 — verification of an applied change
+        #
+        # An approved repair that was applied is verified with the
+        # Phase 7 pipeline (change check, targeted tests, regression
+        # suite) instead of a plain test run. A failed verification
+        # records last_error, so the next decision inspects it; the
+        # current record prevents re-running verification for the
+        # same code.
+        # ----------------------------------------------------------
+
+        if (
+            state.repair_applied
+            and not verification_is_current(state)
+        ):
+            return "verify_changes"
 
         # ----------------------------------------------------------
         # Test workflow
