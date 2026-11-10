@@ -68,8 +68,28 @@ AUTONOMOUS_MAX_ITERATIONS = "MAX_ITERATIONS"
 # says why (FAILED, MISSING, STALE, INCOMPLETE or INCONSISTENT).
 AUTONOMOUS_UNVERIFIED = "UNVERIFIED"
 
+# A human cancelled the task during an intervention (Phase 10.7).
+AUTONOMOUS_CANCELLED = "CANCELLED"
+
 # Agent action that runs the Phase 7 verification pipeline (Phase 10.5).
 VERIFICATION_ACTION = "verify_changes"
+
+
+@dataclass
+class ResumeContext:
+    """Task context carried across a human intervention (Phase 10.7).
+
+    Resuming continues the same lifecycle, progress history, and recovery
+    history, and numbers iterations after ``iteration_offset`` so the
+    histories stay chronological. Execution still happens only through
+    ``run_autonomous_task`` and ``agent.run_once``.
+    """
+
+    lifecycle: TaskLifecycle
+    progress_history: ProgressHistory
+    recovery_history: RecoveryHistory
+    iteration_offset: int
+    reason: str = "Resumed after an explicit human decision."
 
 
 @dataclass
@@ -119,6 +139,12 @@ class AutonomousTaskResult:
         """Return whether the agent stopped without verified evidence."""
 
         return self.status == AUTONOMOUS_UNVERIFIED
+
+    @property
+    def cancelled(self) -> bool:
+        """Return whether a human cancelled the task."""
+
+        return self.status == AUTONOMOUS_CANCELLED
 
     @property
     def failed(self) -> bool:
@@ -377,6 +403,7 @@ def run_autonomous_task(
     *,
     max_iterations: int = 20,
     verification: VerificationRecord | None = None,
+    resume: ResumeContext | None = None,
 ) -> AutonomousTaskResult:
     """Run one task through the autonomous orchestration loop.
 
@@ -415,6 +442,10 @@ def run_autonomous_task(
         verification: Optional Phase 7 pipeline result already bound to
             a code signature with ``record_verification``, used when the
             state holds no verification record of its own.
+        resume: Phase 10.7 context of a task paused at NEEDS_HUMAN whose
+            human decision was already applied. The run continues that
+            lifecycle and those histories; ``max_iterations`` is the
+            number of iterations this run may use.
 
     Progress tracking and evidence are observational. They never
     select or execute actions, mutate state, or approve repairs.
@@ -429,6 +460,20 @@ def run_autonomous_task(
     ):
         raise TypeError("verification must be a VerificationRecord")
 
+    if resume is not None:
+        if resume.lifecycle.status != TASK_NEEDS_HUMAN:
+            raise ValueError(
+                "Only a task paused for human intervention can be resumed."
+            )
+
+        if state.user_input_needed:
+            raise ValueError(
+                "The task is still waiting for a human decision."
+            )
+
+        if resume.iteration_offset < 0:
+            raise ValueError("iteration_offset must be non-negative")
+
     intent = _resolve_intent(agent, state)
 
     def evaluate_evidence() -> CompletionEvidence:
@@ -441,35 +486,50 @@ def run_autonomous_task(
             state.task_intent or intent,
         )
 
-    progress_history = ProgressHistory()
+    if resume is None:
+        progress_history = ProgressHistory()
 
-    # Baseline before any action. Iteration numbers then strictly
-    # increase (1, 2, ...), and ProgressHistory.record rejects any
-    # duplicate or out-of-order iteration explicitly.
-    progress_history.capture(0, state, intent)
+        # Baseline before any action. Iteration numbers then strictly
+        # increase (1, 2, ...), and ProgressHistory.record rejects any
+        # duplicate or out-of-order iteration explicitly.
+        progress_history.capture(0, state, intent)
+
+        lifecycle = TaskLifecycle(task=state.task)
+        recovery_history = RecoveryHistory()
+        first_iteration = 1
+
+        lifecycle.transition(
+            TASK_INITIALIZING,
+            "Autonomous task initialization started.",
+        )
+
+        lifecycle.transition(
+            TASK_RUNNING,
+            "Autonomous execution started.",
+        )
+    else:
+        # Continue the paused task: same lifecycle and histories, and
+        # iteration numbers that follow the previous run.
+        progress_history = resume.progress_history
+        lifecycle = resume.lifecycle
+        recovery_history = resume.recovery_history
+        first_iteration = resume.iteration_offset + 1
+
+        lifecycle.transition(TASK_RUNNING, resume.reason)
 
     evidence = evaluate_evidence()
 
-    lifecycle = TaskLifecycle(task=state.task)
-    recovery_history = RecoveryHistory()
     progress_tracker = ProgressTracker()
     repetition_tracker = ActionRepetitionTracker()
 
     steps: list[AutonomousStep] = []
 
-    lifecycle.transition(
-        TASK_INITIALIZING,
-        "Autonomous task initialization started.",
-    )
-
-    lifecycle.transition(
-        TASK_RUNNING,
-        "Autonomous execution started.",
-    )
-
     previous_signature: str | None = None
 
-    for iteration in range(1, max_iterations + 1):
+    for iteration in range(
+        first_iteration,
+        first_iteration + max_iterations,
+    ):
         if state.finished:
             # The state was finished before this iteration ran, so no
             # new snapshot is captured; evidence reflects the state as

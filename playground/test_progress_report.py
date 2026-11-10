@@ -794,15 +794,16 @@ def test_real_agent_repair_report_stops_at_human_boundary(tmp_path):
         evaluate_completion_evidence(state),
     )
 
-    assert report.verification_status == EVIDENCE_FAILED
+    # Phase 10.6: the run prepares a proposal and stops for approval.
+    assert report.verification_status == EVIDENCE_NEEDS_APPROVAL
     assert report.verified is False
     assert report.human_intervention_required
     assert "the task state is waiting for human input" in (
         report.human_intervention_reasons
     )
-    # inspected, tests run and failure diagnosed: 3 of 6 milestones.
-    assert report.percent == 50
-    assert report.next_milestone == "repair_proposed"
+    # inspected, tests run, diagnosed, proposed: 4 of 6 milestones.
+    assert report.percent == 67
+    assert report.next_milestone == "repair_applied"
 
 
 def test_verified_evidence_with_failed_lifecycle_reported():

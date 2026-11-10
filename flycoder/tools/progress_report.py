@@ -40,6 +40,10 @@ from flycoder.tools.completion_evidence import (
     CompletionEvidence,
     build_code_signature,
 )
+from flycoder.tools.human_intervention import (
+    DecisionRecord,
+    InterventionRequest,
+)
 from flycoder.tools.progress_history import (
     FRACTION_TOLERANCE,
     PROGRESS_DECREASED,
@@ -189,6 +193,10 @@ class ProgressReport:
     agent_marked_finished: bool
     human_intervention_reasons: tuple[str, ...]
     inconsistencies: tuple[str, ...]
+    # Phase 10.7: the pending intervention (if any) and the human
+    # decisions that shaped the task, in order.
+    intervention: InterventionRequest | None = None
+    human_decisions: tuple[DecisionRecord, ...] = ()
 
     # --------------------------------------------------------------
     # A. Task progress
@@ -263,6 +271,12 @@ class ProgressReport:
     @property
     def consistent(self) -> bool:
         return not self.inconsistencies
+
+    @property
+    def intervention_state(self) -> str | None:
+        """Return the pending intervention reason, if any."""
+
+        return self.intervention.reason if self.intervention else None
 
     # --------------------------------------------------------------
     # E. Human-readable summary
@@ -445,6 +459,25 @@ class ProgressReport:
                 f"{self.lifecycle.error_count} error(s)"
             )
 
+        if self.intervention is not None:
+            lines.append("")
+            lines.append(
+                f"Pending intervention: {self.intervention.reason} — "
+                f"{self.intervention.reason_description}"
+            )
+            lines.append(
+                "  Allowed decisions: "
+                + ", ".join(self.intervention.allowed_decisions)
+            )
+
+        if self.human_decisions:
+            lines.append("")
+            lines.append("Human decisions:")
+            lines.extend(
+                f"  - {decision.describe()}"
+                for decision in self.human_decisions
+            )
+
         if self.agent_marked_finished:
             lines.append("")
             lines.append(
@@ -583,6 +616,8 @@ def build_progress_report(
     task_lifecycle: TaskLifecycle | None = None,
     *,
     intent: str | None = None,
+    intervention: InterventionRequest | None = None,
+    human_decisions: tuple[DecisionRecord, ...] = (),
 ) -> ProgressReport:
     """Build a read-only progress report for the current task.
 
@@ -596,6 +631,8 @@ def build_progress_report(
         intent: Task intent; defaults to ``state.task_intent``. Callers
             that observe a task before the agent classifies it (the
             autonomous loop) pass the intent explicitly.
+        intervention: Pending human intervention request, if any.
+        human_decisions: Human decisions applied to this task, in order.
 
     Raises:
         ValueError: if the task intent is missing or unknown.
@@ -643,4 +680,6 @@ def build_progress_report(
             completion_evidence,
             lifecycle_summary,
         ),
+        intervention=intervention,
+        human_decisions=tuple(human_decisions),
     )

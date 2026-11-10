@@ -54,6 +54,7 @@ from flycoder.tools.recovery import (
 )
 from flycoder.tools.verification_pipeline import VerificationPipelineResult
 from flycoder.tools.verification import ChangeVerificationResult
+from flycoder.tools.proposals import record_human_approval
 
 
 ORIGINAL = (
@@ -675,7 +676,8 @@ def applied_partial_repair(tmp_path):
     first = run_task(tmp_path, state, max_iterations=10)
     assert awaiting_repair_approval(state), first.stopped_reason
 
-    # Explicit human approval.
+    # Explicit human approval of the reviewed proposal.
+    record_human_approval(state, state.proposal_fingerprint)
     approval = create_action_registry().execute(
         "approve_repair",
         workspace=Workspace(tmp_path),
@@ -704,6 +706,7 @@ def test_stale_verification_is_not_accepted_and_reverified(tmp_path):
     state = CodingState(task="Fix the failing test")
     run_task(tmp_path, state, max_iterations=10)
 
+    record_human_approval(state, state.proposal_fingerprint)
     create_action_registry().execute(
         "approve_repair",
         workspace=Workspace(tmp_path),

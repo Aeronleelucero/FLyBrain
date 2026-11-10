@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from flycoder.actions import create_action_registry
@@ -613,6 +615,26 @@ class FlyCoderAgent:
 
         if state.user_input_needed:
             return "finish"
+
+        # ----------------------------------------------------------
+        # Human decisions (Phase 10.7)
+        #
+        # A human approval of the exact current proposal is applied by
+        # approve_repair; a human rollback authorization by
+        # rollback_repair. Both still pass the guardrails, which
+        # re-validate the approval (fingerprint, code version) and the
+        # authorization. The agent never creates either decision.
+        # ----------------------------------------------------------
+
+        if state.rollback_authorized and state.repair_applied:
+            return "rollback_repair"
+
+        if (
+            state.repair_approval is not None
+            and state.repair_proposed
+            and not state.repair_applied
+        ):
+            return "approve_repair"
 
         # ----------------------------------------------------------
         # Repair workflow
@@ -1312,8 +1334,24 @@ class FlyCoderAgent:
 # ==================================================================
 
 
-def cli() -> None:
+def cli(
+    argv: list[str] | None = None,
+    *,
+    input_fn: Callable[[str], str] = input,
+    is_interactive: bool | None = None,
+) -> None:
     """Run FLY-CODER from the command line."""
+
+    from flycoder.tools.completion_evidence import (
+        evaluate_completion_evidence,
+    )
+    from flycoder.tools.human_input import awaiting_repair_approval
+    from flycoder.tools.human_intervention import (
+        DECISION_APPROVE,
+        apply_human_decision,
+        build_intervention_request,
+        prompt_for_approval,
+    )
 
     parser = argparse.ArgumentParser(
         description="Task-aware FLY-CODER agent"
@@ -1348,12 +1386,16 @@ def cli() -> None:
         "--approve",
         action="store_true",
         help=(
-            "Automatically approve "
-            "a proposed repair."
+            "Review the exact proposed diff and confirm it "
+            "interactively before it is applied."
         ),
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+
+    interactive = (
+        sys.stdin.isatty() if is_interactive is None else is_interactive
+    )
 
     if args.max_steps < 1:
         parser.error(
@@ -1411,41 +1453,41 @@ def cli() -> None:
             )
 
         # ----------------------------------------------------------
-        # Explicit CLI approval boundary
+        # Explicit CLI approval boundary (Phase 10.7)
         #
-        # This is intentionally NOT passed through automatic
-        # action selection or confidence.
-        #
-        # --approve is an explicit user-provided CLI authorization.
+        # --approve only enables an interactive review of the exact
+        # proposal. A confirmed approval is bound to the proposal
+        # fingerprint and applied by the next run_once through
+        # approve_repair and the guardrails. Without confirmation
+        # nothing is approved.
         # ----------------------------------------------------------
 
-        if (
-            args.approve
-            and state.repair_proposed
-            and not state.repair_applied
-            and state.user_input_needed
-        ):
+        if args.approve and awaiting_repair_approval(state):
 
-            approval_result = (
-                agent.actions.execute(
-                    "approve_repair",
-                    workspace=agent.workspace,
-                    state=state,
-                )
+            request = build_intervention_request(
+                state,
+                evidence=evaluate_completion_evidence(state),
             )
 
-            print(
-                f"[Step {step}] "
-                f"{approval_result.action} | "
-                f"success="
-                f"{approval_result.success}"
+            decision = prompt_for_approval(
+                request,
+                input_fn=input_fn,
+                interactive=interactive,
             )
 
-            if approval_result.message:
-                print(
-                    f"  "
-                    f"{approval_result.message}"
-                )
+            if decision is None:
+                break
+
+            record = apply_human_decision(state, request, decision)
+
+            print(f"[Step {step}] decision | {record.describe()}")
+
+            if decision.kind != DECISION_APPROVE:
+                break
+
+            # The agent previously concluded it had to stop here; the
+            # approval reopens the task so the repair can be applied.
+            state.finished = False
 
     print()
 

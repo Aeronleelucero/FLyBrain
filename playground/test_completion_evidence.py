@@ -35,6 +35,7 @@ from flycoder.tools.testing import (
     TestExecutionResult,
     TestFailure,
 )
+from flycoder.tools.proposals import record_human_approval
 from flycoder.tools.verification import ChangeVerificationResult
 from flycoder.tools.verification_pipeline import (
     VerificationPipelineResult,
@@ -818,7 +819,8 @@ def test_real_repair_cycle_with_real_pipeline(tmp_path):
 
     assert evaluate(state).status == EVIDENCE_NEEDS_APPROVAL
 
-    # Explicit human approval, as the CLI approval boundary would do.
+    # Explicit human approval of the reviewed proposal, then apply.
+    record_human_approval(state, state.proposal_fingerprint)
     assert run("approve_repair").success
 
     assert evaluate(state).status == EVIDENCE_MISSING

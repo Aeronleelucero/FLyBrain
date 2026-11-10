@@ -14,13 +14,18 @@ TASK_COMPLETED = "COMPLETED"
 TASK_FAILED = "FAILED"
 TASK_BLOCKED = "BLOCKED"
 TASK_NEEDS_HUMAN = "NEEDS_HUMAN"
+TASK_CANCELLED = "CANCELLED"
 
 
+# NEEDS_HUMAN ends the current autonomous run, so it counts as terminal
+# for that run; since Phase 10.7 it can be resumed (RUNNING) or cancelled
+# after an explicit human decision.
 TERMINAL_STATES = {
     TASK_COMPLETED,
     TASK_FAILED,
     TASK_BLOCKED,
     TASK_NEEDS_HUMAN,
+    TASK_CANCELLED,
 }
 
 
@@ -48,7 +53,13 @@ ALLOWED_TRANSITIONS: dict[str, set[str]] = {
     TASK_COMPLETED: set(),
     TASK_FAILED: set(),
     TASK_BLOCKED: set(),
-    TASK_NEEDS_HUMAN: set(),
+    # Phase 10.7: resume after a validated human decision, or cancel.
+    # A human decision can never complete a task directly.
+    TASK_NEEDS_HUMAN: {
+        TASK_RUNNING,
+        TASK_CANCELLED,
+    },
+    TASK_CANCELLED: set(),
 }
 
 
@@ -107,6 +118,12 @@ class TaskLifecycle:
 
         return self.status == TASK_NEEDS_HUMAN
 
+    @property
+    def cancelled(self) -> bool:
+        """Return whether the task was cancelled by a human."""
+
+        return self.status == TASK_CANCELLED
+
     def transition(self, new_status: str, reason: str = "") -> TaskTransition:
         """Move the task to another valid lifecycle state."""
 
@@ -133,6 +150,9 @@ class TaskLifecycle:
 
         if new_status in TERMINAL_STATES:
             self.completed_at = transition.timestamp
+        else:
+            # A resumed task is no longer finished.
+            self.completed_at = None
 
         return transition
 

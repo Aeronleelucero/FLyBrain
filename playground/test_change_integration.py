@@ -4,6 +4,7 @@ from flycoder.actions.approval_actions import approve_repair_action
 from flycoder.actions.repair_actions import propose_repair_action
 from flycoder.state import CodingState
 from flycoder.tools.filesystem import Workspace
+from flycoder.tools.proposals import record_human_approval
 
 
 def _create_workspace(tmp_path):
@@ -52,6 +53,7 @@ def test_approval_applies_proposed_change(tmp_path):
     assert proposal.success is True
     assert workspace.read_file("test_example.py") == state.current_file_content
 
+    record_human_approval(state, state.proposal_fingerprint)
     result = approve_repair_action(workspace, state)
 
     assert result.success is True
@@ -80,6 +82,7 @@ def test_approval_rejects_stale_proposal(tmp_path):
     )
     workspace.write_file("test_example.py", changed_content)
 
+    record_human_approval(state, state.proposal_fingerprint)
     result = approve_repair_action(workspace, state)
 
     assert result.success is False

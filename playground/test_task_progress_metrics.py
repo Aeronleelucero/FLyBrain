@@ -12,6 +12,7 @@ from flycoder.state import CodingState
 from flycoder.tools.filesystem import Workspace
 from flycoder.tools.iteration import observe_iteration
 from flycoder.actions.registry import ActionResult
+from flycoder.tools.proposals import record_human_approval
 from flycoder.tools.task_progress import (
     FILES_ANALYZED,
     INTENT_MILESTONES,
@@ -369,7 +370,8 @@ def test_real_repair_cycle_progress_and_rollback_regression(tmp_path):
     assert metrics.awaiting_human is True
     assert metrics.completion_fraction == pytest.approx(4 / 6)
 
-    # Explicit human approval, as the CLI approval boundary would do.
+    # Explicit human approval of the reviewed proposal, then apply.
+    record_human_approval(state, state.proposal_fingerprint)
     result, metrics = run("approve_repair")
 
     assert result.success

@@ -65,6 +65,12 @@ def rollback_repair_action(
     state.repair_proposed = False
     state.proposed_content = None
     state.repair_original_content = None
+    state.proposal_original_content = None
+    state.proposal_code_version = None
+    state.proposal_fingerprint = None
+    state.repair_approval = None
+    # The human rollback authorization was used.
+    state.rollback_authorized = False
     clear_human_input(state)
 
     # The workspace code changed, so earlier test results describe code

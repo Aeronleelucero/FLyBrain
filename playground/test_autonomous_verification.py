@@ -43,6 +43,7 @@ from flycoder.tools.task_lifecycle import (
     TASK_VERIFYING,
 )
 from flycoder.tools.task_progress import TESTS_PASSED, TESTS_RUN, evaluate_milestones
+from flycoder.tools.proposals import record_human_approval
 
 
 ORIGINAL = (
@@ -68,7 +69,8 @@ def run(registry, workspace, state, action):
 def applied_repair(tmp_path, content=ORIGINAL):
     """Reach an explicitly approved, applied repair with real actions.
 
-    The approve_repair call stands in for the human approval boundary.
+    record_human_approval stands in for the human reviewing and approving
+    the exact proposal; approve_repair then applies it.
     """
 
     (tmp_path / "test_sample.py").write_text(content)
@@ -83,10 +85,12 @@ def applied_repair(tmp_path, content=ORIGINAL):
         "fix_error",
         "read_file",
         "propose_repair",
-        "approve_repair",
     ):
         result = run(registry, workspace, state, action)
         assert result.action == action
+
+    record_human_approval(state, state.proposal_fingerprint)
+    assert run(registry, workspace, state, "approve_repair").success
 
     assert state.repair_applied
     return workspace, registry, state
@@ -250,6 +254,7 @@ def test_rejected_stale_approval_preserves_version_and_tests(tmp_path):
     (tmp_path / "test_sample.py").write_text(ORIGINAL + "# edited\n")
     version, tests = state.code_version, (state.tests_run, state.tests_passed)
 
+    record_human_approval(state, state.proposal_fingerprint)
     result = run(registry, workspace, state, "approve_repair")
 
     assert result.success is False

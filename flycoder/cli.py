@@ -1,10 +1,20 @@
 """Command-line interface for FLY-CODER."""
 
 import argparse
+import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from flycoder.agent import FlyCoderAgent
 from flycoder.state import CodingState
+from flycoder.tools.completion_evidence import evaluate_completion_evidence
+from flycoder.tools.human_input import awaiting_repair_approval
+from flycoder.tools.human_intervention import (
+    DECISION_APPROVE,
+    apply_human_decision,
+    build_intervention_request,
+    prompt_for_approval,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -38,7 +48,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--approve",
         action="store_true",
-        help="Automatically approve a proposed repair",
+        help=(
+            "Review the exact proposed diff and confirm it interactively "
+            "before it is applied. Never approves without confirmation."
+        ),
     )
 
     return parser
@@ -63,11 +76,24 @@ def print_repair_proposal(result) -> None:
     print("-" * 60)
 
 
-def main() -> None:
-    """Run the FLY-CODER agent from the terminal."""
+def main(
+    argv: list[str] | None = None,
+    *,
+    input_fn: Callable[[str], str] = input,
+    is_interactive: bool | None = None,
+) -> None:
+    """Run the FLY-CODER agent from the terminal.
+
+    ``input_fn`` and ``is_interactive`` exist so the interactive review
+    can be exercised; by default approval requires a real terminal.
+    """
 
     parser = build_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+
+    interactive = (
+        sys.stdin.isatty() if is_interactive is None else is_interactive
+    )
 
     workspace = Path(args.workspace).resolve()
 
@@ -107,40 +133,46 @@ def main() -> None:
             print("  Test output:")
             print(result.data["output"])
 
-        elif result.action == "propose_repair":
-            print_repair_proposal(result)
+        elif (
+            result.action == "propose_repair"
+            and awaiting_repair_approval(state)
+        ):
+            # Phase 10.7: the human reviews the exact proposal. Approval
+            # is bound to its fingerprint and applied by the next
+            # run_once through approve_repair and the guardrails.
+            request = build_intervention_request(
+                state,
+                evidence=evaluate_completion_evidence(state),
+            )
 
-            if args.approve:
+            if not args.approve:
                 print()
-                print("Approval enabled.")
-                print("Applying repair...")
-
-                approval_result = agent.actions.execute(
-                    "approve_repair",
-                    workspace=agent.workspace,
-                    state=state,
-                )
-
+                print(request.render())
+                print()
                 print(
-                    f"[Approval] "
-                    f"success={approval_result.success}"
+                    "Repair requires approval. "
+                    "Re-run with --approve to review and confirm it."
                 )
-                print(
-                    f"  {approval_result.message}"
-                )
-
-                if not approval_result.success:
-                    state.finished = True
-                    break
-
-                continue
+                break
 
             print()
-            print(
-                "Repair requires approval. "
-                "Re-run with --approve to apply it."
+            decision = prompt_for_approval(
+                request,
+                input_fn=input_fn,
+                interactive=interactive,
             )
-            break
+
+            if decision is None:
+                break
+
+            record = apply_human_decision(state, request, decision)
+
+            print(f"[Decision] {record.describe()}")
+
+            if decision.kind != DECISION_APPROVE:
+                break
+
+            continue
 
         if state.finished:
             break

@@ -5,6 +5,7 @@ import pytest
 from flycoder.tools.task_lifecycle import (
     ALLOWED_TRANSITIONS,
     TASK_BLOCKED,
+    TASK_CANCELLED,
     TASK_COMPLETED,
     TASK_FAILED,
     TASK_INITIALIZING,
@@ -166,4 +167,9 @@ def test_allowed_transitions_define_terminal_states():
     assert ALLOWED_TRANSITIONS[TASK_COMPLETED] == set()
     assert ALLOWED_TRANSITIONS[TASK_FAILED] == set()
     assert ALLOWED_TRANSITIONS[TASK_BLOCKED] == set()
-    assert ALLOWED_TRANSITIONS[TASK_NEEDS_HUMAN] == set()
+    # Phase 10.7: a paused task resumes or is cancelled by a human.
+    assert ALLOWED_TRANSITIONS[TASK_NEEDS_HUMAN] == {
+        TASK_RUNNING,
+        TASK_CANCELLED,
+    }
+    assert ALLOWED_TRANSITIONS[TASK_CANCELLED] == set()

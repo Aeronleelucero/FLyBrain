@@ -1,6 +1,12 @@
+import copy
+
+import pytest
+
+from flycoder.actions.analysis_actions import improve_code_action
 from flycoder.actions.registry import ActionResult
 from flycoder.state import CodingState
 from flycoder.tools.guardrails import (
+    READ_ONLY_ACTIONS,
     GuardrailDecision,
     check_action_safety,
     check_approval_boundary,
@@ -336,7 +342,6 @@ def test_read_only_actions_are_safe_without_repair_context():
         "run_tests",
         "explain_error",
         "review_code",
-        "improve_code",
     ):
         violations, warnings = check_action_safety(
             action,
@@ -344,6 +349,169 @@ def test_read_only_actions_are_safe_without_repair_context():
         )
 
         assert violations == []
+
+
+def test_improve_code_is_allowed_without_existing_repair():
+    state = CodingState(task="Improve code")
+
+    violations, warnings = check_action_safety(
+        "improve_code",
+        state,
+    )
+
+    assert violations == []
+
+
+def test_improve_code_is_blocked_while_proposal_is_pending():
+    state = CodingState(task="Improve code")
+    state.repair_proposed = True
+
+    violations, warnings = check_action_safety(
+        "improve_code",
+        state,
+    )
+
+    assert any("proposal is pending" in item for item in violations)
+
+
+def test_improve_code_is_blocked_while_repair_is_applied():
+    state = CodingState(task="Improve code")
+    state.repair_proposed = True
+    state.repair_approved = True
+    state.repair_applied = True
+
+    violations, warnings = check_action_safety(
+        "improve_code",
+        state,
+    )
+
+    assert any("repair is applied" in item for item in violations)
+
+
+def test_improve_code_action_defensively_rejects_pending_proposal():
+    state = CodingState(task="Improve code")
+    state.repair_proposed = True
+    state.current_file = "example.py"
+    state.current_file_content = "print('hello')"
+
+    before = copy.deepcopy(state)
+    result = improve_code_action(None, state)
+
+    assert result.success is False
+    assert "Resolve the existing repair first." in result.message
+    assert state == before
+
+
+def test_improve_code_action_defensively_rejects_applied_repair():
+    state = CodingState(task="Improve code")
+    state.repair_proposed = True
+    state.repair_approved = True
+    state.repair_applied = True
+    state.current_file = "example.py"
+    state.current_file_content = "print('hello')"
+
+    before = copy.deepcopy(state)
+    result = improve_code_action(None, state)
+
+    assert result.success is False
+    assert "Resolve the existing repair first." in result.message
+    assert state == before
+
+
+# ------------------------------------------------------------------
+# Pre-execution guardrail (check_guardrails) for improve_code
+# ------------------------------------------------------------------
+
+IMPROVE_PENDING_VIOLATION = (
+    "improve_code cannot create another proposal while a repair proposal "
+    "is pending."
+)
+IMPROVE_APPLIED_VIOLATION = (
+    "improve_code cannot create a proposal while a repair is applied."
+)
+
+
+def _improve_result():
+    return ActionResult(action="improve_code", success=True, message="")
+
+
+def _state_with_pending_proposal():
+    """A consistent state holding an unapplied repair proposal."""
+
+    state = CodingState(task="Improve code")
+    state.current_file = "example.py"
+    state.current_file_content = "print('hello')"
+    state.repair_proposed = True
+    state.repair_description = "Replace print with logging."
+    state.proposed_content = "import logging\nlogging.info('hello')"
+    return state
+
+
+def test_check_guardrails_allows_improve_code_without_repair():
+    state = CodingState(task="Improve code")
+    state.current_file = "example.py"
+    state.current_file_content = "print('hello')"
+
+    decision = check_guardrails(_improve_result(), state)
+
+    assert decision.action == "improve_code"
+    assert decision.allowed is True
+    assert decision.violations == []
+
+
+def test_check_guardrails_blocks_improve_code_while_proposal_is_pending():
+    state = _state_with_pending_proposal()
+    before = copy.deepcopy(state)
+
+    decision = check_guardrails(_improve_result(), state)
+
+    assert decision.allowed is False
+    assert decision.violations == [IMPROVE_PENDING_VIOLATION]
+    assert state == before
+
+
+def test_check_guardrails_blocks_improve_code_while_repair_is_applied():
+    state = _state_with_pending_proposal()
+    state.repair_approved = True
+    state.repair_applied = True
+    state.repair_original_content = "print('hello')"
+    before = copy.deepcopy(state)
+
+    decision = check_guardrails(_improve_result(), state)
+
+    assert decision.allowed is False
+    assert decision.violations == [
+        IMPROVE_PENDING_VIOLATION,
+        IMPROVE_APPLIED_VIOLATION,
+    ]
+    assert state == before
+
+
+@pytest.mark.parametrize("action", sorted(READ_ONLY_ACTIONS))
+def test_check_guardrails_still_allows_read_only_actions(action):
+    state = CodingState(task="Read")
+    state.current_file = "example.py"
+
+    decision = check_guardrails(
+        ActionResult(action=action, success=True, message=""),
+        state,
+    )
+
+    assert decision.allowed is True
+    assert decision.violations == []
+
+
+def test_check_guardrails_blocks_unknown_actions():
+    decision = check_guardrails(
+        ActionResult(action="destroy_everything", success=True, message=""),
+        CodingState(task="Unknown"),
+    )
+
+    assert decision.allowed is False
+    assert decision.violations == [
+        "Unknown action 'destroy_everything' cannot pass the execution "
+        "guardrail."
+    ]
 
 
 def test_guardrail_does_not_mutate_state():
@@ -675,6 +843,8 @@ def test_rollback_can_pass_after_approval():
     state.repair_proposed = True
     state.repair_approved = True
     state.repair_applied = True
+    # Phase 10.7: rolling back is itself an explicit human decision.
+    state.rollback_authorized = True
 
     violations, warnings, required = check_approval_boundary(
         "rollback_repair",

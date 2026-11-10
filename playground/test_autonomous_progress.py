@@ -43,6 +43,7 @@ from flycoder.tools.task_lifecycle import (
     TASK_VERIFYING,
 )
 from flycoder.tools.verification_pipeline import verify_change_pipeline
+from flycoder.tools.proposals import record_human_approval
 
 
 PLAYGROUND = Path(__file__).parent
@@ -336,24 +337,33 @@ def test_real_repair_run_evidence_sequence(tmp_path):
 
     result = run_quietly(agent, state, max_iterations=10)
 
+    # Phase 10.6: diagnosis continues into investigation and proposal
+    # preparation, then stops at the approval boundary.
     assert [step.result.action for step in result.steps] == [
         "inspect_files",
         "run_tests",
         "fix_error",
+        "read_file",
+        "propose_repair",
     ]
     assert [step.completion_evidence.status for step in result.steps] == [
         EVIDENCE_MISSING,
         EVIDENCE_FAILED,
         EVIDENCE_FAILED,
+        EVIDENCE_FAILED,
+        EVIDENCE_NEEDS_APPROVAL,
     ]
     assert result.status == AUTONOMOUS_NEEDS_HUMAN
     assert result.completion_evidence is result.steps[-1].completion_evidence
+    assert state.repair_proposed and not state.repair_approved
 
     report = result.progress_report
 
     assert report.human_intervention_required
     assert report.verified is False
-    assert report.percent == 50
+    # inspected, tests run, diagnosed, proposed: 4 of 6 milestones.
+    assert report.percent == 67
+    assert report.next_milestone == "repair_applied"
 
     fractions = [s.completion_fraction for s in result.progress_history]
 
@@ -389,13 +399,21 @@ def test_pending_approval_start_reports_needs_approval():
 
 
 def human_approves_repair(workspace, state):
-    """What a human-driven flow does between autonomous runs."""
+    """What a human does between autonomous runs: approve the proposal.
 
-    registry = create_action_registry()
+    Since Phase 10.6 the first run prepares the proposal itself.
+    """
 
-    for action in ("read_file", "propose_repair", "approve_repair"):
-        result = registry.execute(action, workspace=workspace, state=state)
-        assert result.success, (action, result.message)
+    assert state.repair_proposed and not state.repair_applied
+
+    record_human_approval(state, state.proposal_fingerprint)
+    result = create_action_registry().execute(
+        "approve_repair",
+        workspace=workspace,
+        state=state,
+    )
+
+    assert result.success, result.message
 
 
 def first_run_to_human_boundary(tmp_path):

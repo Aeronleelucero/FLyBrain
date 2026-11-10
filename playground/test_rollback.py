@@ -5,6 +5,7 @@ from flycoder.actions.repair_actions import propose_repair_action
 from flycoder.actions.rollback_actions import rollback_repair_action
 from flycoder.state import CodingState
 from flycoder.tools.filesystem import Workspace
+from flycoder.tools.proposals import record_human_approval
 
 
 def _create_workspace(tmp_path):
@@ -29,6 +30,7 @@ def _apply_repair(workspace, state):
     proposal = propose_repair_action(workspace, state)
     assert proposal.success is True
 
+    record_human_approval(state, state.proposal_fingerprint)
     approval = approve_repair_action(workspace, state)
     assert approval.success is True
 

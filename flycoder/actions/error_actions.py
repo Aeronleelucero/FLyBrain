@@ -98,6 +98,18 @@ def fix_error_action(
     ):
         failing_file = None
 
+    # Phase 10.7: a human may have identified the relevant file after an
+    # insufficient diagnosis. It is validated like any diagnosed path.
+    hint_used = False
+
+    if (
+        failing_file is None
+        and state.diagnosis_hint_file
+        and _workspace_file_exists(workspace, state.diagnosis_hint_file)
+    ):
+        failing_file = state.diagnosis_hint_file
+        hint_used = True
+
     # Prevent the agent from repeatedly inspecting the same error.
     state.error_inspected = True
 
@@ -107,6 +119,7 @@ def fix_error_action(
         "failing_line": failing_line,
         "failing_test": failing_test,
         "workspace": str(workspace.root),
+        "human_hint_used": hint_used,
     }
 
     if failing_file is None:
