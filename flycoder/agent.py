@@ -6,13 +6,17 @@ import argparse
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from flycoder.actions import create_action_registry
 from flycoder.actions.registry import ActionResult
 from flycoder.state import CodingState
 from flycoder.tools.autonomous import (
+    AutonomousStep,
     AutonomousTaskResult,
-    run_autonomous_task,
+    # Compatibility re-export (Phase 10.9): importable from
+    # flycoder.agent before run_task moved to TaskSession.
+    run_autonomous_task,  # noqa: F401
 )
 from flycoder.tools.completion_evidence import verification_is_current
 from flycoder.tools.dependencies import build_dependency_graph
@@ -29,6 +33,9 @@ from flycoder.tools.symbols import (
     analyze_symbols,
     build_symbol_report,
 )
+
+if TYPE_CHECKING:
+    from flycoder.tools.task_session import TaskSession
 
 
 class FlyCoderAgent:
@@ -690,6 +697,38 @@ class FlyCoderAgent:
     # AUTONOMOUS TASK EXECUTION
     # ==============================================================
 
+    def start_task(
+        self,
+        task: str,
+        *,
+        max_iterations: int = 20,
+        state: CodingState | None = None,
+        on_step: Callable[[AutonomousStep], None] | None = None,
+    ) -> TaskSession:
+        """Start a task under a ``TaskSession`` and return the session.
+
+        Phase 10.9: the session is the orchestration controller. It runs
+        the task through the autonomous loop until it stops, and keeps
+        the context needed to show interventions, apply human
+        decisions, resume, cancel, and report. ``state`` may supply
+        prepared task context (its task must match); ``on_step`` is a
+        read-only step observer.
+
+        It never automatically approves a repair.
+        """
+
+        # Imported here: task_session depends on the autonomous loop,
+        # which this module also imports.
+        from flycoder.tools.task_session import TaskSession
+
+        return TaskSession.start(
+            self,
+            task,
+            max_iterations=max_iterations,
+            state=state,
+            on_step=on_step,
+        )
+
     def run_task(
         self,
         task: str,
@@ -706,17 +745,24 @@ class FlyCoderAgent:
         human-approval boundaries.
 
         It never automatically approves a repair.
+
+        Phase 10.9: the task runs under a ``TaskSession``
+        (``start_task``). The session is closed before returning,
+        because the caller only receives the result: a paused task
+        therefore reports that it cannot be resumed. Use
+        ``start_task`` to keep the session.
         """
 
-        state = CodingState(
-            task=task,
-        )
-
-        return run_autonomous_task(
-            self,
-            state,
+        session = self.start_task(
+            task,
             max_iterations=max_iterations,
         )
+        session.close(
+            "run_task() does not keep the session, so the task cannot be "
+            "resumed."
+        )
+
+        return session.result
 
     # ==============================================================
     # REVIEW REPORT
@@ -1340,22 +1386,16 @@ def cli(
     input_fn: Callable[[str], str] = input,
     is_interactive: bool | None = None,
 ) -> None:
-    """Run FLY-CODER from the command line."""
+    """Run FLY-CODER from the command line.
 
-    from flycoder.tools.completion_evidence import (
-        evaluate_completion_evidence,
-    )
-    from flycoder.tools.completion_outcome import (
-        classify_stopped_run,
-        verification_attempt,
-    )
-    from flycoder.tools.human_input import awaiting_repair_approval
-    from flycoder.tools.human_intervention import (
-        DECISION_APPROVE,
-        apply_human_decision,
-        build_intervention_request,
-        prompt_for_approval,
-    )
+    Phase 10.9: the task runs through a ``TaskSession`` with the shared
+    ``flycoder.cli.run_cli_session`` driver; this interface keeps its own
+    output format.
+    """
+
+    # Imported here: flycoder.cli imports this module.
+    from flycoder.cli import render_session_outcome, run_cli_session
+    from flycoder.tools.task_session import TaskSession
 
     parser = argparse.ArgumentParser(
         description="Task-aware FLY-CODER agent"
@@ -1425,28 +1465,11 @@ def cli(
 
     print()
 
-    verification_attempts = []
-    result = None
-    budget_exhausted = False
-
-    for step in range(
-        args.max_steps
-    ):
-
-        if state.finished:
-            break
-
-        result = agent.run_once(
-            state
-        )
-
-        attempt = verification_attempt(step, result)
-
-        if attempt is not None:
-            verification_attempts.append(attempt)
+    def print_step(step) -> None:
+        result = step.result
 
         print(
-            f"[Step {step}] "
+            f"[Step {step.iteration - 1}] "
             f"{result.action} | "
             f"success={result.success}"
         )
@@ -1465,68 +1488,51 @@ def cli(
                 f"  data={result.data}"
             )
 
-        # ----------------------------------------------------------
-        # Explicit CLI approval boundary (Phase 10.7)
-        #
-        # --approve only enables an interactive review of the exact
-        # proposal. A confirmed approval is bound to the proposal
-        # fingerprint and applied by the next run_once through
-        # approve_repair and the guardrails. Without confirmation
-        # nothing is approved.
-        # ----------------------------------------------------------
+    def print_decision(record, index: int) -> None:
+        print(f"[Step {index}] decision | {record.describe()}")
 
-        if args.approve and awaiting_repair_approval(state):
+    def finish(session) -> None:
+        print()
 
-            request = build_intervention_request(
-                state,
-                evidence=evaluate_completion_evidence(state),
+        # Phase 10.8: report how the task ended, from evidence. "The
+        # agent stopped" is never reported as success unless the work
+        # is verified.
+        print(render_session_outcome(session))
+
+        if (
+            session.state.repair_proposed
+            and not session.state.repair_applied
+        ):
+            print(
+                "A repair proposal is waiting "
+                "for approval."
             )
 
-            decision = prompt_for_approval(
-                request,
-                input_fn=input_fn,
-                interactive=interactive,
-            )
+    # ----------------------------------------------------------
+    # Explicit CLI approval boundary (Phase 10.7)
+    #
+    # --approve only enables an interactive review of the exact
+    # proposal. A confirmed approval is bound to the proposal
+    # fingerprint and applied through approve_repair and the
+    # guardrails when the session resumes. Without confirmation
+    # nothing is approved.
+    # ----------------------------------------------------------
 
-            if decision is None:
-                break
-
-            record = apply_human_decision(state, request, decision)
-
-            print(f"[Step {step}] decision | {record.describe()}")
-
-            if decision.kind != DECISION_APPROVE:
-                break
-
-            # The agent previously concluded it had to stop here; the
-            # approval reopens the task so the repair can be applied.
-            state.finished = False
-    else:
-        # The step budget ran out without the agent concluding the task.
-        budget_exhausted = not state.finished
-
-    print()
-
-    # Phase 10.8: report how the task ended, from evidence. "The agent
-    # stopped" is never reported as success unless the work is verified.
-    outcome = classify_stopped_run(
+    session = TaskSession(
+        agent,
         state,
-        intent=state.task_intent or agent.classify_task(state.task),
-        budget_exhausted=budget_exhausted,
-        verification_attempts=verification_attempts,
-        final_result=result,
+        max_iterations=args.max_steps,
     )
 
-    print(outcome.render())
-
-    if (
-        state.repair_proposed
-        and not state.repair_applied
-    ):
-        print(
-            "A repair proposal is waiting "
-            "for approval."
-        )
+    run_cli_session(
+        session,
+        approve=args.approve,
+        input_fn=input_fn,
+        interactive=interactive,
+        print_step=print_step,
+        print_decision=print_decision,
+        finish=finish,
+    )
 
 
 if __name__ == "__main__":

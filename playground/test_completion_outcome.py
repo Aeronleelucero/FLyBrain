@@ -1027,13 +1027,20 @@ def test_cli_reports_verified_completion_after_approval(tmp_path):
     assert "Verification runs: 1 (0 failed)" in output
 
 
-def test_cli_rejection_is_partial_not_success(tmp_path):
+def test_cli_rejection_is_not_success(tmp_path):
+    # Phase 10.9 (approved change): the CLI runs through a TaskSession,
+    # so a rejection resumes the normal workflow. The agent cannot
+    # re-offer the rejected repair and stops at the no_safe_repair
+    # boundary, which is reported as awaiting a human, not as partial
+    # completion (that came from the old lifecycle-less CLI inference).
     write(tmp_path)
 
     output = run_cli(tmp_path, ["--task", REPAIR_TASK, "--approve"], answer="no")
 
-    assert "Outcome: PARTIALLY_COMPLETED" in output
+    assert "Outcome: AWAITING_HUMAN" in output
+    assert "The only safe automatic repair was already rejected" in output
     assert "Successful: no" in output
+    assert "Can resume: no" in output
     assert disk(tmp_path) == ORIGINAL
 
 

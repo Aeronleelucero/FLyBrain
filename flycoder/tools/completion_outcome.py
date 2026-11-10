@@ -518,6 +518,23 @@ class CompletionOutcome:
         return self.definition.description
 
     @property
+    def next_step(self) -> str:
+        """The recommended next step for this specific outcome.
+
+        Presentation only: a resumable outcome that cannot be resumed
+        here (no session, closed session, or no budget) recommends
+        running the task again instead of resuming it.
+        """
+
+        if self.definition.resumable and not self.can_resume:
+            return (
+                "Run the task again; it cannot be resumed here. "
+                "Review the pending intervention first."
+            )
+
+        return self.definition.next_step
+
+    @property
     def verification_failures(self) -> int:
         return sum(1 for attempt in self.verification_attempts if not attempt.passed)
 
@@ -585,7 +602,7 @@ class CompletionOutcome:
         else:
             lines.append("Can resume: no")
 
-        lines.append(f"Next step: {self.definition.next_step}")
+        lines.append(f"Next step: {self.next_step}")
 
         return tuple(lines)
 
