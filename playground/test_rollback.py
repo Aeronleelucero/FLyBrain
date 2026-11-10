@@ -5,6 +5,7 @@ from flycoder.actions.repair_actions import propose_repair_action
 from flycoder.actions.rollback_actions import rollback_repair_action
 from flycoder.state import CodingState
 from flycoder.tools.filesystem import Workspace
+from flycoder.tools.proposals import record_human_approval
 
 
 def _create_workspace(tmp_path):
@@ -29,6 +30,7 @@ def _apply_repair(workspace, state):
     proposal = propose_repair_action(workspace, state)
     assert proposal.success is True
 
+    record_human_approval(state, state.proposal_fingerprint)
     approval = approve_repair_action(workspace, state)
     assert approval.success is True
 
@@ -165,3 +167,39 @@ def test_rollback_uses_atomic_write(tmp_path, monkeypatch):
     assert len(calls) == 1
     assert calls[0][0] == "test_example.py"
     assert calls[0][1] == state.current_file_content
+
+
+def test_rollback_invalidates_previous_test_results(tmp_path):
+    # Test results recorded for the repaired code do not describe the
+    # restored original code, so a fresh test run must be required.
+    workspace = _create_workspace(tmp_path)
+    state = _create_state(workspace)
+
+    _apply_repair(workspace, state)
+
+    state.tests_run = True
+    state.tests_passed = True
+
+    result = rollback_repair_action(workspace, state)
+
+    assert result.success is True
+    assert state.tests_run is False
+    assert state.tests_passed is False
+
+
+def test_rejected_rollback_keeps_test_results(tmp_path):
+    workspace = _create_workspace(tmp_path)
+    state = _create_state(workspace)
+
+    _apply_repair(workspace, state)
+
+    state.tests_run = True
+    state.tests_passed = True
+
+    workspace.write_file("test_example.py", "changed = True\n")
+
+    result = rollback_repair_action(workspace, state)
+
+    assert result.success is False
+    assert state.tests_run is True
+    assert state.tests_passed is True

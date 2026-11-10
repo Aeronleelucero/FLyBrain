@@ -3,11 +3,22 @@
 from __future__ import annotations
 
 import argparse
+import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from flycoder.actions import create_action_registry
 from flycoder.actions.registry import ActionResult
 from flycoder.state import CodingState
+from flycoder.tools.autonomous import (
+    AutonomousStep,
+    AutonomousTaskResult,
+    # Compatibility re-export (Phase 10.9): importable from
+    # flycoder.agent before run_task moved to TaskSession.
+    run_autonomous_task,  # noqa: F401
+)
+from flycoder.tools.completion_evidence import verification_is_current
 from flycoder.tools.dependencies import build_dependency_graph
 from flycoder.tools.execution import observe_action
 from flycoder.tools.filesystem import Workspace
@@ -17,10 +28,14 @@ from flycoder.tools.learning_feedback import (
     record_learning_outcome,
 )
 from flycoder.tools.memory import MemoryStore
+from flycoder.tools.recovery import repair_evidence_sufficient
 from flycoder.tools.symbols import (
     analyze_symbols,
     build_symbol_report,
 )
+
+if TYPE_CHECKING:
+    from flycoder.tools.task_session import TaskSession
 
 
 class FlyCoderAgent:
@@ -596,7 +611,44 @@ class FlyCoderAgent:
                 return "improve_code"
 
         # ----------------------------------------------------------
+        # Human boundary (Phase 10.6)
+        #
+        # While explicit human input is pending (repair approval,
+        # insufficient diagnosis, no safe repair, ...), every action is
+        # blocked by the guardrails. Stop instead of choosing actions
+        # that can only be blocked; this is what previously left the
+        # CLI looping on blocked read_file calls.
+        # ----------------------------------------------------------
+
+        if state.user_input_needed:
+            return "finish"
+
+        # ----------------------------------------------------------
+        # Human decisions (Phase 10.7)
+        #
+        # A human approval of the exact current proposal is applied by
+        # approve_repair; a human rollback authorization by
+        # rollback_repair. Both still pass the guardrails, which
+        # re-validate the approval (fingerprint, code version) and the
+        # authorization. The agent never creates either decision.
+        # ----------------------------------------------------------
+
+        if state.rollback_authorized and state.repair_applied:
+            return "rollback_repair"
+
+        if (
+            state.repair_approval is not None
+            and state.repair_proposed
+            and not state.repair_applied
+        ):
+            return "approve_repair"
+
+        # ----------------------------------------------------------
         # Repair workflow
+        #
+        # Diagnosis (fix_error) continues into read-only investigation
+        # (read_file) and proposal preparation (propose_repair). The
+        # proposal stops at the approval boundary; nothing is applied.
         # ----------------------------------------------------------
 
         if (
@@ -612,16 +664,25 @@ class FlyCoderAgent:
         ):
             return "read_file"
 
-        if (
-            state.task_intent == "repair"
-            and state.error_inspected
-            and state.current_file_content is not None
-            and not state.repair_proposed
-        ):
+        if repair_evidence_sufficient(state):
             return "propose_repair"
 
-        if state.user_input_needed:
-            return "finish"
+        # ----------------------------------------------------------
+        # Phase 10.5 — verification of an applied change
+        #
+        # An approved repair that was applied is verified with the
+        # Phase 7 pipeline (change check, targeted tests, regression
+        # suite) instead of a plain test run. A failed verification
+        # records last_error, so the next decision inspects it; the
+        # current record prevents re-running verification for the
+        # same code.
+        # ----------------------------------------------------------
+
+        if (
+            state.repair_applied
+            and not verification_is_current(state)
+        ):
+            return "verify_changes"
 
         # ----------------------------------------------------------
         # Test workflow
@@ -631,6 +692,77 @@ class FlyCoderAgent:
             return "run_tests"
 
         return "finish"
+
+    # ==============================================================
+    # AUTONOMOUS TASK EXECUTION
+    # ==============================================================
+
+    def start_task(
+        self,
+        task: str,
+        *,
+        max_iterations: int = 20,
+        state: CodingState | None = None,
+        on_step: Callable[[AutonomousStep], None] | None = None,
+    ) -> TaskSession:
+        """Start a task under a ``TaskSession`` and return the session.
+
+        Phase 10.9: the session is the orchestration controller. It runs
+        the task through the autonomous loop until it stops, and keeps
+        the context needed to show interventions, apply human
+        decisions, resume, cancel, and report. ``state`` may supply
+        prepared task context (its task must match); ``on_step`` is a
+        read-only step observer.
+
+        It never automatically approves a repair.
+        """
+
+        # Imported here: task_session depends on the autonomous loop,
+        # which this module also imports.
+        from flycoder.tools.task_session import TaskSession
+
+        return TaskSession.start(
+            self,
+            task,
+            max_iterations=max_iterations,
+            state=state,
+            on_step=on_step,
+        )
+
+    def run_task(
+        self,
+        task: str,
+        *,
+        max_iterations: int = 20,
+    ) -> AutonomousTaskResult:
+        """Run a task through the autonomous orchestration layer.
+
+        Each iteration delegates to ``run_once()`` through the
+        autonomous orchestration system.
+
+        The autonomous layer preserves the existing decision,
+        guardrail, observation, recovery, learning, and
+        human-approval boundaries.
+
+        It never automatically approves a repair.
+
+        Phase 10.9: the task runs under a ``TaskSession``
+        (``start_task``). The session is closed before returning,
+        because the caller only receives the result: a paused task
+        therefore reports that it cannot be resumed. Use
+        ``start_task`` to keep the session.
+        """
+
+        session = self.start_task(
+            task,
+            max_iterations=max_iterations,
+        )
+        session.close(
+            "run_task() does not keep the session, so the task cannot be "
+            "resumed."
+        )
+
+        return session.result
 
     # ==============================================================
     # REVIEW REPORT
@@ -1248,8 +1380,22 @@ class FlyCoderAgent:
 # ==================================================================
 
 
-def cli() -> None:
-    """Run FLY-CODER from the command line."""
+def cli(
+    argv: list[str] | None = None,
+    *,
+    input_fn: Callable[[str], str] = input,
+    is_interactive: bool | None = None,
+) -> None:
+    """Run FLY-CODER from the command line.
+
+    Phase 10.9: the task runs through a ``TaskSession`` with the shared
+    ``flycoder.cli.run_cli_session`` driver; this interface keeps its own
+    output format.
+    """
+
+    # Imported here: flycoder.cli imports this module.
+    from flycoder.cli import render_session_outcome, run_cli_session
+    from flycoder.tools.task_session import TaskSession
 
     parser = argparse.ArgumentParser(
         description="Task-aware FLY-CODER agent"
@@ -1284,12 +1430,16 @@ def cli() -> None:
         "--approve",
         action="store_true",
         help=(
-            "Automatically approve "
-            "a proposed repair."
+            "Review the exact proposed diff and confirm it "
+            "interactively before it is applied."
         ),
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+
+    interactive = (
+        sys.stdin.isatty() if is_interactive is None else is_interactive
+    )
 
     if args.max_steps < 1:
         parser.error(
@@ -1315,19 +1465,11 @@ def cli() -> None:
 
     print()
 
-    for step in range(
-        args.max_steps
-    ):
-
-        if state.finished:
-            break
-
-        result = agent.run_once(
-            state
-        )
+    def print_step(step) -> None:
+        result = step.result
 
         print(
-            f"[Step {step}] "
+            f"[Step {step.iteration - 1}] "
             f"{result.action} | "
             f"success={result.success}"
         )
@@ -1346,63 +1488,51 @@ def cli() -> None:
                 f"  data={result.data}"
             )
 
-        # ----------------------------------------------------------
-        # Explicit CLI approval boundary
-        #
-        # This is intentionally NOT passed through automatic
-        # action selection or confidence.
-        #
-        # --approve is an explicit user-provided CLI authorization.
-        # ----------------------------------------------------------
+    def print_decision(record, index: int) -> None:
+        print(f"[Step {index}] decision | {record.describe()}")
+
+    def finish(session) -> None:
+        print()
+
+        # Phase 10.8: report how the task ended, from evidence. "The
+        # agent stopped" is never reported as success unless the work
+        # is verified.
+        print(render_session_outcome(session))
 
         if (
-            args.approve
-            and state.repair_proposed
-            and not state.repair_applied
-            and state.user_input_needed
+            session.state.repair_proposed
+            and not session.state.repair_applied
         ):
-
-            approval_result = (
-                agent.actions.execute(
-                    "approve_repair",
-                    workspace=agent.workspace,
-                    state=state,
-                )
-            )
-
             print(
-                f"[Step {step}] "
-                f"{approval_result.action} | "
-                f"success="
-                f"{approval_result.success}"
+                "A repair proposal is waiting "
+                "for approval."
             )
 
-            if approval_result.message:
-                print(
-                    f"  "
-                    f"{approval_result.message}"
-                )
+    # ----------------------------------------------------------
+    # Explicit CLI approval boundary (Phase 10.7)
+    #
+    # --approve only enables an interactive review of the exact
+    # proposal. A confirmed approval is bound to the proposal
+    # fingerprint and applied through approve_repair and the
+    # guardrails when the session resumes. Without confirmation
+    # nothing is approved.
+    # ----------------------------------------------------------
 
-    print()
+    session = TaskSession(
+        agent,
+        state,
+        max_iterations=args.max_steps,
+    )
 
-    if state.finished:
-        print(
-            "Agent finished."
-        )
-
-    else:
-        print(
-            "Maximum steps reached."
-        )
-
-    if (
-        state.repair_proposed
-        and not state.repair_applied
-    ):
-        print(
-            "A repair proposal is waiting "
-            "for approval."
-        )
+    run_cli_session(
+        session,
+        approve=args.approve,
+        input_fn=input_fn,
+        interactive=interactive,
+        print_step=print_step,
+        print_decision=print_decision,
+        finish=finish,
+    )
 
 
 if __name__ == "__main__":

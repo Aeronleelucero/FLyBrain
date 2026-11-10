@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 
 from flycoder.actions.registry import ActionResult
 from flycoder.state import CodingState
+from flycoder.tools.human_input import human_input_violations
+from flycoder.tools.proposals import ApprovalRecord, approval_problems
 
 
 @dataclass
@@ -34,13 +36,27 @@ READ_ONLY_ACTIONS = {
     "run_tests",
     "explain_error",
     "review_code",
-    "improve_code",
 }
 
 
-KNOWN_ACTIONS = READ_ONLY_ACTIONS | REPAIR_SENSITIVE_ACTIONS | {
-    "fix_error",
+# Runs the Phase 7 verification pipeline. It executes tests but never
+# modifies files; it is only meaningful for an applied code change.
+VERIFICATION_ACTIONS = {
+    "verify_changes",
 }
+
+
+KNOWN_ACTIONS = (
+    READ_ONLY_ACTIONS
+    | REPAIR_SENSITIVE_ACTIONS
+    | VERIFICATION_ACTIONS
+    | {
+        "fix_error",
+        # Records a proposal (not read-only); checked explicitly in
+        # check_action_safety().
+        "improve_code",
+    }
+)
 
 
 def check_state_consistency(
@@ -127,6 +143,31 @@ def check_state_consistency(
             "tests_passed cannot be true when tests_run is false."
         )
 
+    # ----------------------------------------------------------
+    # Human input boundary (Phase 10.6)
+    # ----------------------------------------------------------
+
+    violations.extend(human_input_violations(state))
+
+    # ----------------------------------------------------------
+    # Human decisions (Phase 10.7)
+    # ----------------------------------------------------------
+
+    if state.repair_approval is not None:
+        if not isinstance(state.repair_approval, ApprovalRecord):
+            violations.append(
+                "repair_approval must be an ApprovalRecord."
+            )
+        elif not state.repair_proposed:
+            violations.append(
+                "A human approval cannot exist without a repair proposal."
+            )
+
+    if state.rollback_authorized and not state.repair_applied:
+        violations.append(
+            "rollback_authorized requires an applied repair."
+        )
+
     return violations, warnings
 
 
@@ -149,7 +190,35 @@ def check_action_safety(
         )
         return violations, warnings
 
+    if action == "improve_code":
+        if state.repair_proposed:
+            violations.append(
+                "improve_code cannot create another proposal while a "
+                "repair proposal is pending."
+            )
+
+        if state.repair_applied:
+            violations.append(
+                "improve_code cannot create a proposal while a repair "
+                "is applied."
+            )
+
+        return violations, warnings
+
     if action in READ_ONLY_ACTIONS:
+        return violations, warnings
+
+    if action == "verify_changes":
+        if not state.repair_applied:
+            violations.append(
+                "verify_changes requires an applied code change."
+            )
+
+        if state.repair_applied and not state.repair_approved:
+            violations.append(
+                "verify_changes cannot verify an unapproved change."
+            )
+
         return violations, warnings
 
     if action == "fix_error":
@@ -206,9 +275,13 @@ def check_action_safety(
         return violations, warnings
 
     if action == "approve_repair":
-        violations.append(
-            "approve_repair is always controlled by explicit human approval."
-        )
+        # Phase 10.7: allowed only with an explicit human approval bound
+        # to the exact current proposal and code version.
+        if approval_problems(state):
+            violations.append(
+                "approve_repair is always controlled by explicit human "
+                "approval of the exact current proposal."
+            )
 
         if not state.repair_proposed:
             violations.append(
@@ -280,10 +353,16 @@ def check_approval_boundary(
     # ----------------------------------------------------------
 
     if action == "approve_repair":
-        violations.append(
-            "approve_repair requires explicit human authorization."
-        )
-        requires_human_approval = True
+        problems = approval_problems(state)
+
+        if problems:
+            violations.append(
+                "approve_repair requires explicit human authorization."
+            )
+            violations.extend(
+                f"Approval check: {problem}" for problem in problems
+            )
+            requires_human_approval = True
 
     # ----------------------------------------------------------
     # Repair-sensitive actions
@@ -298,6 +377,14 @@ def check_approval_boundary(
                 f"{action} requires an explicitly approved repair."
             )
             requires_human_approval = True
+
+    # Phase 10.7: undoing an applied repair is a human decision too.
+    if action == "rollback_repair" and not state.rollback_authorized:
+        violations.append(
+            "rollback_repair requires explicit human rollback "
+            "authorization."
+        )
+        requires_human_approval = True
 
     return violations, warnings, requires_human_approval
 

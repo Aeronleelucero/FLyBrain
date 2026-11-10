@@ -206,7 +206,6 @@ def test_strategy_selection_does_not_modify_context():
 
 def test_strategy_selection_does_not_modify_memory():
     memory = make_memory()
-
     context = LearningContext(
         task="Fix authentication validation",
         memories=[memory],

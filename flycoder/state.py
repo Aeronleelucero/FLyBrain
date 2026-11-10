@@ -1,6 +1,7 @@
 """State definitions for the FLY-CODER agent."""
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from flycoder.tools.code_paths import CodePath
 from flycoder.tools.complexity import ComplexityInfo
@@ -16,6 +17,10 @@ from flycoder.tools.symbols import (
     Symbol,
     SymbolGraph,
 )
+
+if TYPE_CHECKING:
+    from flycoder.tools.completion_evidence import VerificationRecord
+    from flycoder.tools.proposals import ApprovalRecord
 
 
 @dataclass
@@ -131,6 +136,23 @@ class CodingState:
     error_inspected: bool = False
 
     # ----------------------------------------------------------
+    # Verification freshness (Phase 10.5)
+    #
+    # code_version increases on every successful code modification
+    # made through an agent action. tests_code_version records which
+    # code version the last test run verified (None: recorded before
+    # versioning, i.e. version 0). See flycoder.tools.freshness.
+    # ----------------------------------------------------------
+
+    code_version: int = 0
+
+    tests_code_version: int | None = None
+
+    # Latest Phase 7 verification pipeline result, bound to the code
+    # signature it verified (a completion_evidence.VerificationRecord).
+    verification_record: "VerificationRecord | None" = None
+
+    # ----------------------------------------------------------
     # Adaptive execution
     # ----------------------------------------------------------
 
@@ -162,9 +184,43 @@ class CodingState:
     repair_original_content: str | None = None
 
     # ----------------------------------------------------------
+    # Proposal binding and human decisions (Phase 10.7)
+    # See flycoder.tools.proposals and flycoder.tools.human_intervention.
+    # ----------------------------------------------------------
+
+    # Exact original content the current proposal was computed from.
+    proposal_original_content: str | None = None
+
+    # Code version when the current proposal was created.
+    proposal_code_version: int | None = None
+
+    # SHA-256 fingerprint of (file, original, proposed) content.
+    proposal_fingerprint: str | None = None
+
+    # Explicit human approval bound to one exact proposal
+    # (a proposals.ApprovalRecord). Never created by the agent.
+    repair_approval: "ApprovalRecord | None" = None
+
+    # Fingerprints of proposals a human rejected; never offered again.
+    rejected_proposals: list[str] = field(default_factory=list)
+
+    # Explicit human authorization to roll back the applied repair.
+    rollback_authorized: bool = False
+
+    # Information supplied by humans, available to later reasoning.
+    human_notes: list[str] = field(default_factory=list)
+
+    # Workspace file a human identified as relevant to the failure.
+    diagnosis_hint_file: str | None = None
+
+    # ----------------------------------------------------------
     # Agent control
     # ----------------------------------------------------------
 
     user_input_needed: bool = False
+
+    # Why user_input_needed was set (Phase 10.6). One of the reasons in
+    # flycoder.tools.human_input; None when no reason was recorded.
+    human_input_reason: str | None = None
 
     finished: bool = False

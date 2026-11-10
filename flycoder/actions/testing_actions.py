@@ -7,6 +7,7 @@ import sys
 from flycoder.actions.registry import ActionResult
 from flycoder.state import CodingState
 from flycoder.tools.filesystem import Workspace
+from flycoder.tools.freshness import record_test_run
 
 
 def run_tests_action(
@@ -55,12 +56,13 @@ def run_tests_action(
         if part
     ).strip()
 
-    state.tests_run = True
-    state.tests_passed = result.returncode == 0
-    state.last_error = None if state.tests_passed else output
-
-    # Allow a fresh error-inspection cycle on every test run.
-    state.error_inspected = False
+    # Records the result for the current code version and resets the
+    # error-inspection cycle (see flycoder.tools.freshness).
+    record_test_run(
+        state,
+        passed=result.returncode == 0,
+        output=output,
+    )
 
     return ActionResult(
         action="run_tests",

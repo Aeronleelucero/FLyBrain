@@ -7,6 +7,15 @@ from flycoder.tools.changes import (
     create_change_proposal,
 )
 from flycoder.tools.filesystem import Workspace
+from flycoder.tools.proposals import (
+    compute_proposal_fingerprint,
+    record_proposal,
+)
+from flycoder.tools.human_input import (
+    HUMAN_INPUT_NO_SAFE_REPAIR,
+    HUMAN_INPUT_REPAIR_APPROVAL,
+    request_human_input,
+)
 
 
 def propose_repair_action(
@@ -46,6 +55,10 @@ def propose_repair_action(
         )
 
     else:
+        # Insufficient evidence for a safe repair: never manufacture one.
+        # Stop at the human boundary so the attempt is not repeated.
+        request_human_input(state, HUMAN_INPUT_NO_SAFE_REPAIR)
+
         return ActionResult(
             action="propose_repair",
             success=False,
@@ -69,6 +82,8 @@ def propose_repair_action(
     )
 
     if not proposal.changed:
+        request_human_input(state, HUMAN_INPUT_NO_SAFE_REPAIR)
+
         return ActionResult(
             action="propose_repair",
             success=False,
@@ -78,12 +93,42 @@ def propose_repair_action(
             },
         )
 
-    state.repair_description = proposal.description
-    state.proposed_content = proposal.proposed_content
-    state.repair_proposed = True
-    state.repair_approved = False
-    state.repair_applied = False
-    state.user_input_needed = True
+    fingerprint = compute_proposal_fingerprint(
+        proposal.file,
+        proposal.original_content,
+        proposal.proposed_content,
+    )
+
+    if fingerprint in state.rejected_proposals:
+        # A human already rejected exactly this proposal. Re-offering it
+        # without new evidence would just repeat the same decision.
+        request_human_input(state, HUMAN_INPUT_NO_SAFE_REPAIR)
+
+        return ActionResult(
+            action="propose_repair",
+            success=False,
+            message=(
+                "The only safe automatic repair was already rejected. "
+                "Manual review is required."
+            ),
+            data={
+                "file": state.current_file,
+                "rejected_fingerprint": fingerprint,
+            },
+        )
+
+    # Binds the exact file, original, and proposed content (and the code
+    # version) so a later approval can only apply this proposal.
+    record_proposal(
+        state,
+        file=proposal.file,
+        original_content=proposal.original_content,
+        proposed_content=proposal.proposed_content,
+        description=proposal.description,
+    )
+
+    # The proposal stops at the approval boundary. Nothing was written.
+    request_human_input(state, HUMAN_INPUT_REPAIR_APPROVAL)
 
     return ActionResult(
         action="propose_repair",
@@ -95,6 +140,8 @@ def propose_repair_action(
             "original_content": proposal.original_content,
             "proposed_content": proposal.proposed_content,
             "diff": build_change_diff(proposal),
+            "fingerprint": fingerprint,
+            "code_version": state.code_version,
             "requires_approval": True,
         },
     )

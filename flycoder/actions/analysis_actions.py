@@ -7,6 +7,11 @@ from flycoder.tools.complexity import analyze_complexity
 from flycoder.tools.control_flow import analyze_control_flow
 from flycoder.tools.data_flow import analyze_data_flow
 from flycoder.tools.filesystem import Workspace
+from flycoder.tools.human_input import (
+    HUMAN_INPUT_REPAIR_APPROVAL,
+    request_human_input,
+)
+from flycoder.tools.proposals import record_proposal
 from flycoder.tools.references import analyze_references
 from flycoder.tools.symbols import (
     SymbolGraph,
@@ -426,6 +431,17 @@ def improve_code_action(
 ) -> ActionResult:
     """Create a basic improvement proposal without modifying files."""
 
+    if state.repair_proposed or state.repair_applied:
+        return ActionResult(
+            action="improve_code",
+            success=False,
+            message=(
+                "Cannot create an improvement proposal while another "
+                "repair proposal is pending or a repair is applied. "
+                "Resolve the existing repair first."
+            ),
+        )
+
     if not state.current_file:
         return ActionResult(
             action="improve_code",
@@ -461,13 +477,17 @@ def improve_code_action(
             "A deeper semantic review is recommended."
         )
 
-    state.repair_description = (
-        "Code improvement proposal created. "
-        "No file was modified."
+    record_proposal(
+        state,
+        file=state.current_file,
+        original_content=content,
+        proposed_content=proposed_content,
+        description=(
+            "Code improvement proposal created. "
+            "No file was modified."
+        ),
     )
-    state.proposed_content = proposed_content
-    state.repair_proposed = True
-    state.user_input_needed = True
+    request_human_input(state, HUMAN_INPUT_REPAIR_APPROVAL)
 
     return ActionResult(
         action="improve_code",

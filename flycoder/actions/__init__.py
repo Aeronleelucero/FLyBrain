@@ -16,6 +16,7 @@ from flycoder.actions.registry import ActionRegistry
 from flycoder.actions.repair_actions import propose_repair_action
 from flycoder.actions.rollback_actions import rollback_repair_action
 from flycoder.actions.testing_actions import run_tests_action
+from flycoder.actions.verification_actions import verify_changes_action
 
 
 def create_action_registry() -> ActionRegistry:
@@ -28,6 +29,7 @@ def create_action_registry() -> ActionRegistry:
     registry.register("write_code", write_file_action)
 
     registry.register("run_tests", run_tests_action)
+    registry.register("verify_changes", verify_changes_action)
 
     registry.register("fix_error", fix_error_action)
     registry.register("propose_repair", propose_repair_action)
