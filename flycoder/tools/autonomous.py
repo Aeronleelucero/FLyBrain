@@ -16,6 +16,22 @@ from flycoder.tools.completion_evidence import (
     VerificationRecord,
     evaluate_completion_evidence,
 )
+from flycoder.tools.completion_outcome import (
+    AUTONOMOUS_BLOCKED,
+    AUTONOMOUS_CANCELLED,
+    AUTONOMOUS_COMPLETED,
+    AUTONOMOUS_FAILED,
+    AUTONOMOUS_MAX_ITERATIONS,
+    AUTONOMOUS_NEEDS_HUMAN,
+    AUTONOMOUS_UNVERIFIED,
+    VERIFICATION_ACTION,
+    CompletionOutcome,
+    VerificationAttempt,
+    classify_completion_outcome,
+    guardrail_blocked,
+    success_blockers,
+    verification_attempt,
+)
 from flycoder.tools.execution import ExecutionObservation, observe_action
 from flycoder.tools.iteration import (
     IterationObservation,
@@ -57,22 +73,10 @@ if TYPE_CHECKING:
     from flycoder.agent import FlyCoderAgent
 
 
-AUTONOMOUS_COMPLETED = "COMPLETED"
-AUTONOMOUS_FAILED = "FAILED"
-AUTONOMOUS_BLOCKED = "BLOCKED"
-AUTONOMOUS_NEEDS_HUMAN = "NEEDS_HUMAN"
-AUTONOMOUS_MAX_ITERATIONS = "MAX_ITERATIONS"
-
-# The agent stopped (``state.finished``) but completion evidence does not
-# verify the task. ``AutonomousTaskResult.completion_evidence.status``
-# says why (FAILED, MISSING, STALE, INCOMPLETE or INCONSISTENT).
-AUTONOMOUS_UNVERIFIED = "UNVERIFIED"
-
-# A human cancelled the task during an intervention (Phase 10.7).
-AUTONOMOUS_CANCELLED = "CANCELLED"
-
-# Agent action that runs the Phase 7 verification pipeline (Phase 10.5).
-VERIFICATION_ACTION = "verify_changes"
+# The stop statuses (AUTONOMOUS_*) and VERIFICATION_ACTION are defined in
+# ``flycoder.tools.completion_outcome`` since Phase 10.8 and re-exported
+# here unchanged. A stop status says why a run stopped; the completion
+# outcome (``AutonomousTaskResult.outcome``) says what it achieved.
 
 
 @dataclass
@@ -90,6 +94,10 @@ class ResumeContext:
     recovery_history: RecoveryHistory
     iteration_offset: int
     reason: str = "Resumed after an explicit human decision."
+    # Phase 10.8: steps of the earlier runs of this task, so verification
+    # runs before the pause still count when the outcome is classified
+    # (a failed verification is not forgotten by resuming).
+    prior_steps: tuple[AutonomousStep, ...] = ()
 
 
 @dataclass
@@ -127,6 +135,18 @@ class AutonomousTaskResult:
     completion_evidence: CompletionEvidence | None = None
     progress_report: ProgressReport | None = None
     recovery_history: RecoveryHistory | None = None
+    # Phase 10.8: evidence-based completion outcome of this result.
+    outcome: CompletionOutcome | None = None
+
+    @property
+    def successful(self) -> bool:
+        """Return whether the outcome is verified completion.
+
+        Only ``OUTCOME_VERIFIED_COMPLETE`` is successful; without a
+        classified outcome nothing is reported as successful.
+        """
+
+        return self.outcome is not None and self.outcome.successful
 
     @property
     def completed(self) -> bool:
@@ -192,15 +212,24 @@ def _execution_observation(
 def _guardrail_blocked(result: ActionResult) -> bool:
     """Return whether a result was blocked by a guardrail."""
 
-    if not isinstance(result.data, dict):
-        return False
+    return guardrail_blocked(result)
 
-    guardrail = result.data.get("guardrail")
 
-    if not isinstance(guardrail, dict):
-        return False
+def _verification_attempts(
+    steps: list[AutonomousStep] | tuple[AutonomousStep, ...],
+) -> tuple[VerificationAttempt, ...]:
+    """Return the verification runs recorded in ``steps``, in order."""
 
-    return guardrail.get("allowed") is False
+    attempts = (
+        verification_attempt(
+            step.iteration,
+            step.result,
+            step.completion_evidence,
+        )
+        for step in steps
+    )
+
+    return tuple(attempt for attempt in attempts if attempt is not None)
 
 
 def _record_step(
@@ -219,6 +248,41 @@ def _record_step(
         lifecycle.record_error(result.message)
 
 
+def _classify_outcome(
+    state: CodingState,
+    *,
+    status: str,
+    lifecycle: TaskLifecycle,
+    evidence: CompletionEvidence,
+    steps: tuple[AutonomousStep, ...],
+    recovery_history: RecoveryHistory | None,
+    final_result: ActionResult | None,
+    resume_available: bool = True,
+) -> CompletionOutcome:
+    """Classify a task's outcome from its complete execution record.
+
+    ``steps`` must be every step of the task so far (across human
+    interventions), so earlier verification runs are never forgotten.
+    """
+
+    return classify_completion_outcome(
+        state,
+        evidence,
+        stop_status=status,
+        lifecycle_status=lifecycle.status,
+        verification_attempts=_verification_attempts(steps),
+        recovery_attempts=(
+            len(recovery_history) if recovery_history is not None else 0
+        ),
+        final_error=(
+            final_result.message
+            if final_result is not None and not final_result.success
+            else None
+        ),
+        resume_available=resume_available,
+    )
+
+
 def _finish_result(
     *,
     state: CodingState,
@@ -231,6 +295,8 @@ def _finish_result(
     evidence: CompletionEvidence,
     intent: str,
     recovery_history: RecoveryHistory | None = None,
+    prior_steps: tuple[AutonomousStep, ...] = (),
+    resume_available: bool = True,
 ) -> AutonomousTaskResult:
     """Build the final autonomous task result and its progress report.
 
@@ -238,7 +304,23 @@ def _finish_result(
     describes the task exactly as the result reports it. The intent is
     passed explicitly because a task can end before the agent ever
     classified it (for example, a state that was already finished).
+
+    Phase 10.8: the completion outcome is classified here, once, from
+    the final lifecycle status, stop status, evidence, every
+    verification run (``prior_steps`` plus ``steps``), and the recovery
+    history. The report carries the same outcome.
     """
+
+    outcome = _classify_outcome(
+        state,
+        status=status,
+        lifecycle=lifecycle,
+        evidence=evidence,
+        steps=tuple(prior_steps) + tuple(steps),
+        recovery_history=recovery_history,
+        final_result=final_result,
+        resume_available=resume_available,
+    )
 
     return AutonomousTaskResult(
         task=state.task,
@@ -251,12 +333,14 @@ def _finish_result(
         progress_history=history,
         completion_evidence=evidence,
         recovery_history=recovery_history,
+        outcome=outcome,
         progress_report=build_progress_report(
             state,
             history,
             evidence,
             lifecycle,
             intent=state.task_intent or intent,
+            outcome=outcome,
         ),
     )
 
@@ -311,13 +395,16 @@ def _complete_finished_task(
     lifecycle: TaskLifecycle,
     evidence: CompletionEvidence,
     finished_reason: str,
+    verification_attempts: tuple[VerificationAttempt, ...] = (),
 ) -> tuple[str, str]:
     """Gate completion of a finished task on completion evidence.
 
     ``state.finished`` only means the agent stopped choosing actions.
-    The task is COMPLETED only when the evidence is VERIFIED. Pending
-    approval escalates to a human. Any other evidence status leaves the
-    task UNVERIFIED; it is never reported as successful.
+    The task is COMPLETED only when ``success_blockers`` finds nothing:
+    VERIFIED evidence, and no failed verification run without a newer
+    passing one (Phase 10.8). Pending approval escalates to a human.
+    Anything else leaves the task UNVERIFIED; it is never reported as
+    successful.
 
     Returns the autonomous status and the stopped reason.
     """
@@ -336,7 +423,9 @@ def _complete_finished_task(
     if lifecycle.status == TASK_RUNNING:
         lifecycle.transition(TASK_VERIFYING, finished_reason)
 
-    if evidence.verified:
+    blockers = success_blockers(evidence, verification_attempts)
+
+    if not blockers:
         reason = (
             "Autonomous task completed with verified evidence "
             f"({evidence.verification_method})."
@@ -347,7 +436,11 @@ def _complete_finished_task(
 
         return AUTONOMOUS_COMPLETED, reason
 
-    detail = f" {evidence.reasons[-1]}" if evidence.reasons else ""
+    if evidence.verified:
+        detail = f" {blockers[-1]}"
+    else:
+        detail = f" {evidence.reasons[-1]}" if evidence.reasons else ""
+
     reason = (
         "The agent finished, but completion evidence is "
         f"{evidence.status}.{detail}"
@@ -497,6 +590,7 @@ def run_autonomous_task(
         lifecycle = TaskLifecycle(task=state.task)
         recovery_history = RecoveryHistory()
         first_iteration = 1
+        prior_steps: tuple[AutonomousStep, ...] = ()
 
         lifecycle.transition(
             TASK_INITIALIZING,
@@ -514,6 +608,7 @@ def run_autonomous_task(
         lifecycle = resume.lifecycle
         recovery_history = resume.recovery_history
         first_iteration = resume.iteration_offset + 1
+        prior_steps = tuple(resume.prior_steps)
 
         lifecycle.transition(TASK_RUNNING, resume.reason)
 
@@ -538,6 +633,7 @@ def run_autonomous_task(
                 lifecycle,
                 evidence,
                 "Agent had already marked the task finished.",
+                _verification_attempts(prior_steps + tuple(steps)),
             )
 
             return _finish_result(
@@ -551,6 +647,7 @@ def run_autonomous_task(
                 evidence=evidence,
                 intent=intent,
                 recovery_history=recovery_history,
+                prior_steps=prior_steps,
             )
 
         result = agent.run_once(state)
@@ -664,6 +761,7 @@ def run_autonomous_task(
                 evidence=evidence,
                 intent=intent,
                 recovery_history=recovery_history,
+                prior_steps=prior_steps,
             )
 
         if _guardrail_blocked(result):
@@ -686,6 +784,7 @@ def run_autonomous_task(
                 evidence=evidence,
                 intent=intent,
                 recovery_history=recovery_history,
+                prior_steps=prior_steps,
             )
 
         if state.finished:
@@ -693,6 +792,7 @@ def run_autonomous_task(
                 lifecycle,
                 evidence,
                 "The agent marked the task finished.",
+                _verification_attempts(prior_steps + tuple(steps)),
             )
 
             return _finish_result(
@@ -706,6 +806,7 @@ def run_autonomous_task(
                 evidence=evidence,
                 intent=intent,
                 recovery_history=recovery_history,
+                prior_steps=prior_steps,
             )
 
         if iteration_decision.should_escalate:
@@ -726,6 +827,7 @@ def run_autonomous_task(
                 evidence=evidence,
                 intent=intent,
                 recovery_history=recovery_history,
+                prior_steps=prior_steps,
             )
 
         if iteration_decision.should_stop:
@@ -746,6 +848,7 @@ def run_autonomous_task(
                 evidence=evidence,
                 intent=intent,
                 recovery_history=recovery_history,
+                prior_steps=prior_steps,
             )
 
         if not result.success:
@@ -769,6 +872,7 @@ def run_autonomous_task(
                     evidence=evidence,
                     intent=intent,
                     recovery_history=recovery_history,
+                    prior_steps=prior_steps,
                 )
 
         # The autonomous layer intentionally does not execute
@@ -801,4 +905,5 @@ def run_autonomous_task(
         evidence=evidence,
         intent=intent,
         recovery_history=recovery_history,
+        prior_steps=prior_steps,
     )

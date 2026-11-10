@@ -22,6 +22,9 @@ Design decisions
   reported, but never treated as verification.
 * Contradictions between the sources are reported side by side rather
   than resolved, so nothing is hidden.
+* Phase 10.8: a supplied ``CompletionOutcome`` (classified once by
+  ``completion_outcome.classify_completion_outcome``) is reported as it
+  is. The report never classifies an outcome itself.
 * History here is task-level (``progress_history``). The iteration-level
   ``flycoder.tools.progress.ProgressTracker``/``ProgressSnapshot`` are a
   different model and are rejected.
@@ -39,6 +42,10 @@ from flycoder.tools.completion_evidence import (
     EVIDENCE_INCONSISTENT,
     CompletionEvidence,
     build_code_signature,
+)
+from flycoder.tools.completion_outcome import (
+    CompletionOutcome,
+    outcome_consistency_problems,
 )
 from flycoder.tools.human_intervention import (
     DecisionRecord,
@@ -197,6 +204,10 @@ class ProgressReport:
     # decisions that shaped the task, in order.
     intervention: InterventionRequest | None = None
     human_decisions: tuple[DecisionRecord, ...] = ()
+    # Phase 10.8: how the task ended (or that it has not), and the
+    # session's task identifier when the task runs in a TaskSession.
+    outcome: CompletionOutcome | None = None
+    task_id: str | None = None
 
     # --------------------------------------------------------------
     # A. Task progress
@@ -277,6 +288,18 @@ class ProgressReport:
         """Return the pending intervention reason, if any."""
 
         return self.intervention.reason if self.intervention else None
+
+    @property
+    def outcome_status(self) -> str | None:
+        """Return the completion outcome identifier, if supplied."""
+
+        return self.outcome.outcome if self.outcome is not None else None
+
+    @property
+    def successful(self) -> bool:
+        """True only for a supplied VERIFIED_COMPLETE outcome."""
+
+        return self.outcome is not None and self.outcome.successful
 
     # --------------------------------------------------------------
     # E. Human-readable summary
@@ -421,15 +444,28 @@ class ProgressReport:
         else:
             headline = f"NOT VERIFIED ({self.evidence.status})"
 
-        lines = [
-            f"FLY-CODER progress report — {self.task}",
+        lines = [f"FLY-CODER progress report — {self.task}"]
+
+        if self.task_id is not None:
+            lines.append(f"Task ID: {self.task_id}")
+
+        lines.append(
             f"Intent: {self.intent} | Progress: {self.percent}% | "
-            f"Status: {headline}",
-            "",
-            *self.summary,
-            "",
-            *self.progress.explain(),
-        ]
+            f"Status: {headline}"
+        )
+
+        if self.outcome is not None:
+            lines.append("")
+            lines.extend(self.outcome.render_lines())
+
+        lines.extend(
+            [
+                "",
+                *self.summary,
+                "",
+                *self.progress.explain(),
+            ]
+        )
 
         if self.history is not None and self.history.recent_changes:
             lines.append("")
@@ -618,6 +654,8 @@ def build_progress_report(
     intent: str | None = None,
     intervention: InterventionRequest | None = None,
     human_decisions: tuple[DecisionRecord, ...] = (),
+    outcome: CompletionOutcome | None = None,
+    task_id: str | None = None,
 ) -> ProgressReport:
     """Build a read-only progress report for the current task.
 
@@ -633,6 +671,10 @@ def build_progress_report(
             autonomous loop) pass the intent explicitly.
         intervention: Pending human intervention request, if any.
         human_decisions: Human decisions applied to this task, in order.
+        outcome: Completion outcome classified for this task, if any.
+            It is reported as supplied; contradictions with the lifecycle
+            or evidence are listed as inconsistencies.
+        task_id: Identifier of the task session, if any.
 
     Raises:
         ValueError: if the task intent is missing or unknown.
@@ -648,6 +690,9 @@ def build_progress_report(
         CompletionEvidence,
     ):
         raise TypeError("completion_evidence must be CompletionEvidence")
+
+    if outcome is not None and not isinstance(outcome, CompletionOutcome):
+        raise TypeError("outcome must be a CompletionOutcome")
 
     progress = measure_task_progress(state, intent)
 
@@ -679,7 +724,18 @@ def build_progress_report(
             history_summary,
             completion_evidence,
             lifecycle_summary,
+        )
+        + (
+            outcome_consistency_problems(
+                outcome,
+                completion_evidence,
+                lifecycle_summary.status if lifecycle_summary else None,
+            )
+            if outcome is not None
+            else ()
         ),
         intervention=intervention,
         human_decisions=tuple(human_decisions),
+        outcome=outcome,
+        task_id=task_id,
     )

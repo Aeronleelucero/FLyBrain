@@ -8,6 +8,10 @@ from pathlib import Path
 from flycoder.agent import FlyCoderAgent
 from flycoder.state import CodingState
 from flycoder.tools.completion_evidence import evaluate_completion_evidence
+from flycoder.tools.completion_outcome import (
+    classify_stopped_run,
+    verification_attempt,
+)
 from flycoder.tools.human_input import awaiting_repair_approval
 from flycoder.tools.human_intervention import (
     DECISION_APPROVE,
@@ -114,8 +118,17 @@ def main(
     print(f"Task Intent: {state.task_intent}")
     print()
 
+    verification_attempts = []
+    result = None
+    budget_exhausted = False
+
     for step in range(args.max_steps):
         result = agent.run_once(state)
+
+        attempt = verification_attempt(step, result)
+
+        if attempt is not None:
+            verification_attempts.append(attempt)
 
         print(
             f"[Step {step}] "
@@ -176,6 +189,9 @@ def main(
 
         if state.finished:
             break
+    else:
+        # The step budget ran out without the agent concluding the task.
+        budget_exhausted = not state.finished
 
     print()
     print("Final state:")
@@ -186,6 +202,19 @@ def main(
     print(f"  Repair approved: {state.repair_approved}")
     print(f"  Repair applied: {state.repair_applied}")
     print(f"  Finished: {state.finished}")
+
+    # Phase 10.8: report how the task ended, from evidence. A stopped or
+    # finished agent is not success unless the work is verified.
+    outcome = classify_stopped_run(
+        state,
+        intent=state.task_intent,
+        budget_exhausted=budget_exhausted,
+        verification_attempts=verification_attempts,
+        final_result=result,
+    )
+
+    print()
+    print(outcome.render())
 
 
 if __name__ == "__main__":

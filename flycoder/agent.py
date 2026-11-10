@@ -1345,6 +1345,10 @@ def cli(
     from flycoder.tools.completion_evidence import (
         evaluate_completion_evidence,
     )
+    from flycoder.tools.completion_outcome import (
+        classify_stopped_run,
+        verification_attempt,
+    )
     from flycoder.tools.human_input import awaiting_repair_approval
     from flycoder.tools.human_intervention import (
         DECISION_APPROVE,
@@ -1421,6 +1425,10 @@ def cli(
 
     print()
 
+    verification_attempts = []
+    result = None
+    budget_exhausted = False
+
     for step in range(
         args.max_steps
     ):
@@ -1431,6 +1439,11 @@ def cli(
         result = agent.run_once(
             state
         )
+
+        attempt = verification_attempt(step, result)
+
+        if attempt is not None:
+            verification_attempts.append(attempt)
 
         print(
             f"[Step {step}] "
@@ -1488,18 +1501,23 @@ def cli(
             # The agent previously concluded it had to stop here; the
             # approval reopens the task so the repair can be applied.
             state.finished = False
+    else:
+        # The step budget ran out without the agent concluding the task.
+        budget_exhausted = not state.finished
 
     print()
 
-    if state.finished:
-        print(
-            "Agent finished."
-        )
+    # Phase 10.8: report how the task ended, from evidence. "The agent
+    # stopped" is never reported as success unless the work is verified.
+    outcome = classify_stopped_run(
+        state,
+        intent=state.task_intent or agent.classify_task(state.task),
+        budget_exhausted=budget_exhausted,
+        verification_attempts=verification_attempts,
+        final_result=result,
+    )
 
-    else:
-        print(
-            "Maximum steps reached."
-        )
+    print(outcome.render())
 
     if (
         state.repair_proposed

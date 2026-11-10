@@ -7,13 +7,21 @@ applied. Execution always goes through ``run_autonomous_task`` (and so
 ``agent.run_once`` and the guardrails); resuming passes a
 ``ResumeContext`` instead of starting a new task.
 
+Phase 10.8: the session keeps the task's completion outcome current.
+After every run, decision, and cancellation it re-evaluates completion
+evidence from the state and re-classifies the outcome from the complete
+step history (``_classify_outcome``), including whether this session can
+actually resume (iterations left, not restricted to cancellation).
+
 Limitation: sessions live in memory only. Persisting a paused task
 across processes would need a reviewed serialization format and is not
-implemented.
+implemented. The task identifier is therefore only meaningful within
+this process.
 """
 
 from __future__ import annotations
 
+import uuid
 from typing import TYPE_CHECKING
 
 from flycoder.state import CodingState
@@ -22,9 +30,11 @@ from flycoder.tools.autonomous import (
     AutonomousStep,
     AutonomousTaskResult,
     ResumeContext,
+    _classify_outcome,
     _finish_result,
     run_autonomous_task,
 )
+from flycoder.tools.completion_outcome import CompletionOutcome
 from flycoder.tools.completion_evidence import evaluate_completion_evidence
 from flycoder.tools.human_intervention import (
     DECISION_CANCEL_TASK,
@@ -64,6 +74,9 @@ class TaskSession:
         self.agent = agent
         self.state = state
         self.max_iterations = max_iterations
+        # Process-local identifier for reports (sessions are not
+        # persisted).
+        self.task_id = uuid.uuid4().hex[:12]
         self.steps: list[AutonomousStep] = []
         self.result: AutonomousTaskResult | None = None
         self._decisions: list[DecisionRecord] = []
@@ -105,6 +118,48 @@ class TaskSession:
     def _absorb(self, result: AutonomousTaskResult) -> None:
         self.steps.extend(result.steps)
         self.result = result
+        self._refresh()
+
+    def _intent(self) -> str:
+        return self.state.task_intent or self.agent.classify_task(self.state.task)
+
+    def _resume_available(self) -> bool:
+        request = self.intervention_request()
+
+        cancellation_only = (
+            request is not None
+            and request.allowed_decisions == (DECISION_CANCEL_TASK,)
+        )
+
+        return self.remaining_iterations >= 1 and not cancellation_only
+
+    def _refresh(self) -> None:
+        """Re-evaluate evidence and the outcome from the current state.
+
+        Called after every run, decision, and cancellation, so the
+        result never reports evidence or an outcome the state no longer
+        supports. Evaluation is read-only; earlier per-step evidence in
+        ``self.steps`` is kept as it was recorded.
+        """
+
+        result = self.result
+        evidence = evaluate_completion_evidence(
+            self.state,
+            intent=self._intent(),
+        )
+
+        result.completion_evidence = evidence
+        result.outcome = _classify_outcome(
+            self.state,
+            status=result.status,
+            lifecycle=result.lifecycle,
+            evidence=evidence,
+            steps=tuple(self.steps),
+            recovery_history=result.recovery_history,
+            final_result=self.steps[-1].result if self.steps else None,
+            resume_available=self._resume_available(),
+        )
+        result.progress_report = self.report()
 
     @property
     def iterations_used(self) -> int:
@@ -136,6 +191,12 @@ class TaskSession:
     @property
     def decisions(self) -> tuple[DecisionRecord, ...]:
         return tuple(self._decisions)
+
+    @property
+    def outcome(self) -> CompletionOutcome | None:
+        """The task's current completion outcome (Phase 10.8)."""
+
+        return self.result.outcome if self.result else None
 
     # --------------------------------------------------------------
     # Human intervention
@@ -185,6 +246,10 @@ class TaskSession:
 
         if decision.kind == DECISION_CANCEL_TASK:
             self._cancel(record)
+        else:
+            # The decision changed the state (for example a discarded
+            # proposal); evidence and outcome are recalculated.
+            self._refresh()
 
         return record
 
@@ -192,7 +257,10 @@ class TaskSession:
         lifecycle = self.lifecycle
         lifecycle.transition(TASK_CANCELLED, record.outcome)
 
-        evidence = evaluate_completion_evidence(self.state)
+        evidence = evaluate_completion_evidence(
+            self.state,
+            intent=self._intent(),
+        )
 
         # Reuse the loop's result builder so the final report has the
         # same shape; cancellation is never COMPLETED.
@@ -205,12 +273,11 @@ class TaskSession:
             lifecycle=lifecycle,
             history=self.result.progress_history,
             evidence=evidence,
-            intent=(
-                self.state.task_intent
-                or self.agent.classify_task(self.state.task)
-            ),
+            intent=self._intent(),
             recovery_history=self.result.recovery_history,
+            resume_available=False,
         )
+        self._refresh()
 
     def resume(self) -> AutonomousTaskResult:
         """Continue the task through the existing loop after a decision.
@@ -254,6 +321,7 @@ class TaskSession:
                 progress_history=previous.progress_history,
                 recovery_history=previous.recovery_history,
                 iteration_offset=iteration_offset,
+                prior_steps=tuple(self.steps),
             ),
         )
 
@@ -275,4 +343,6 @@ class TaskSession:
             intent=self.state.task_intent,
             intervention=self.intervention_request(),
             human_decisions=self.decisions,
+            outcome=self.outcome,
+            task_id=self.task_id,
         )
